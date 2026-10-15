@@ -1,0 +1,21 @@
+product_id,barcode,product_name,unit_of_measure,pack_size,current_retail_price,product_type,category_id
+1,9312345000018,Bananas Cavendish,kg,loose,4.2,PERISHABLE,1
+2,9312345000025,Mangoes Kensington Pride,each,single,3.5,PERISHABLE,1
+3,9312345000032,Baby Spinach,pack,120g,4.0,PERISHABLE,1
+4,9312345000049,Tomatoes Truss,kg,loose,7.9,PERISHABLE,1
+5,9312345000056,Full Cream Milk,bottle,2L,3.6,PERISHABLE,2
+6,9312345000063,Greek Yoghurt,tub,1kg,7.5,PERISHABLE,2
+7,9312345000070,Tasty Cheese Block,pack,500g,9.2,PERISHABLE,2
+8,9312345000087,White Sandwich Loaf,loaf,700g,3.9,PERISHABLE,3
+9,9312345000094,Multigrain Rolls,pack,6 pack,5.2,PERISHABLE,3
+10,9312345000100,Barramundi Fillets,pack,400g,22.05,PERISHABLE,4
+11,9312345000117,Green Prawns,kg,loose,33.6,PERISHABLE,4
+12,9312345000124,Beef Mince Premium,kg,loose,17.32,PERISHABLE,4
+13,9312345000131,Jasmine Rice,bag,5kg,14.0,AMBIENT,5
+14,9312345000148,Penne Pasta,pack,500g,2.3,AMBIENT,5
+15,9312345000155,Olive Oil Extra Virgin,bottle,1L,13.5,AMBIENT,5
+16,9312345000162,Tinned Tomatoes,tin,400g,1.4,AMBIENT,5
+17,9312345000179,Instant Coffee,jar,200g,11.8,AMBIENT,5
+18,9312345000186,Laundry Powder,box,2kg,12.6,AMBIENT,6
+19,9312345000193,Dishwashing Liquid,bottle,1L,4.8,AMBIENT,6
+20,9312345000209,Paper Towel,pack,4 rolls,6.4,AMBIENT,6

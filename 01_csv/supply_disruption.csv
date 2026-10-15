@@ -1,0 +1,4 @@
+disruption_id,start_date,end_date,cause,severity
+1,2026-02-03,2026-02-11,"Tropical Cyclone Ilsa, Stuart Highway closed",HIGH
+2,2026-04-18,2026-04-21,Berrimah DC refrigeration failure,MEDIUM
+3,2026-06-09,,National carrier industrial action,LOW

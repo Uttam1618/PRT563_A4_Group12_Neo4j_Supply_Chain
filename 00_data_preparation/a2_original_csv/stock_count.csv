@@ -1,0 +1,5 @@
+count_id,count_date,count_type,employee_id
+1,2026-03-31,CYCLE,4
+2,2026-05-15,SPOT,8
+3,2026-06-30,FULL,9
+4,2026-08-14,CYCLE,5

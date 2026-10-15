@@ -1,0 +1,179 @@
+AUDIT OF csv
+
+Rule  Violations  Description
+R01            0  Batch received date equals its delivery date
+R02           19  Batch product is a product ordered on the delivery's purchase order
+R03            0  Batch qty received equals delivered minus rejected on its delivery line
+R04            9  Perishable use by date is within the product's shelf life; ambient has none
+R05           14  Batch is shelved in the store its purchase order was raised for
+R06           15  Batch is shelved in a bay whose temperature zone suits the product
+R07            0  Delivery is on or after its purchase order date, and only for a sent PO
+R08            2  PO status agrees with its deliveries (SENT/DRAFT/CANCELLED have none)
+R09            2  Invoice is dated on or after the delivery and only for PO deliveries
+R10            9  Invoice amount equals units accepted times agreed cost
+R11            5  A disruption only affects deliveries scheduled during the disruption
+R12           17  PO line cost equals the supply agreement valid on the order date
+R13            0  PO value is within the raising officer's ordering limit
+R14           24  Sale is at the store where the batch is shelved
+R15            5  Sale is on or after the batch was received
+R16           14  Sale is on or before the batch use by date
+R17            3  Marked down sale line uses its markdown's batch, time and price
+R18            0  Markdown is applied while the batch is on shelf (received to use by)
+R19            1  Write off is on or after receipt; EXPIRED only after use by, perishable only
+R20            0  Write off value is within the authorising duty manager's limit
+R21            9  Stock count only counts batches on shelf (received, not expired)
+R22            2  Counted quantity does not exceed system quantity
+R23            0  Qty on hand equals received minus sold minus written off
+R24            0  Store last full stocktake matches a FULL count covering that store
+ALL          150
+
+[R02] batch 1: product 5 not on PO 1 (ordered [11])
+[R02] batch 2: product 20 not on PO 1 (ordered [11])
+[R02] batch 3: product 6 not on PO 1 (ordered [11])
+[R02] batch 4: product 5 not on PO 2 (ordered [8])
+[R02] batch 5: product 13 not on PO 2 (ordered [8])
+[R02] batch 6: product 12 not on PO 2 (ordered [8])
+[R02] batch 7: product 1 not on PO 3 (ordered [15, 16, 19])
+[R02] batch 9: product 15 not on PO 4 (ordered [20])
+[R02] batch 10: product 14 not on PO 4 (ordered [20])
+[R02] batch 14: product 17 not on PO 5 (ordered [10])
+[R02] batch 15: product 6 not on PO 5 (ordered [10])
+[R02] batch 16: product 18 not on PO 5 (ordered [10])
+[R02] batch 17: product 10 not on PO 6 (ordered [1, 11, 13])
+[R02] batch 20: product 4 not on PO 2 (ordered [8])
+[R02] batch 21: product 3 not on PO 2 (ordered [8])
+[R02] batch 22: product 1 not on PO 2 (ordered [8])
+[R02] batch 23: product 4 not on PO 7 (ordered [12, 17])
+[R02] batch 24: product 19 not on PO 7 (ordered [12, 17])
+[R02] batch 25: product 4 not on PO 8 (ordered [3, 18])
+[R04] batch 1: use by 14 days after receipt, shelf life 12
+[R04] batch 4: use by 14 days after receipt, shelf life 12
+[R04] batch 6: use by 21 days after receipt, shelf life 4
+[R04] batch 7: use by 14 days after receipt, shelf life 10
+[R04] batch 11: use by 14 days after receipt, shelf life 6
+[R04] batch 17: use by 5 days after receipt, shelf life 3
+[R04] batch 19: use by 14 days after receipt, shelf life 2
+[R04] batch 21: use by 10 days after receipt, shelf life 6
+[R04] batch 23: use by 14 days after receipt, shelf life 9
+[R05] batch 1: shelved in store 2, PO 1 is for store 1
+[R05] batch 3: shelved in store 3, PO 1 is for store 1
+[R05] batch 5: shelved in store 1, PO 2 is for store 2
+[R05] batch 6: shelved in store 3, PO 2 is for store 2
+[R05] batch 7: shelved in store 4, PO 3 is for store 1
+[R05] batch 8: shelved in store 3, PO 3 is for store 1
+[R05] batch 9: shelved in store 2, PO 4 is for store 3
+[R05] batch 16: shelved in store 4, PO 5 is for store 2
+[R05] batch 17: shelved in store 3, PO 6 is for store 1
+[R05] batch 20: shelved in store 1, PO 2 is for store 2
+[R05] batch 21: shelved in store 3, PO 2 is for store 2
+[R05] batch 23: shelved in store 3, PO 7 is for store 4
+[R05] batch 24: shelved in store 3, PO 7 is for store 4
+[R05] batch 25: shelved in store 1, PO 8 is for store 3
+[R06] batch 3: product 6 in AMBIENT bay 3:D21
+[R06] batch 4: product 5 in AMBIENT bay 2:A12
+[R06] batch 6: product 12 in AMBIENT bay 3:A12
+[R06] batch 7: product 1 in FROZEN bay 4:C09
+[R06] batch 9: product 15 in CHILLED bay 2:B04
+[R06] batch 10: product 14 in CHILLED bay 3:B04
+[R06] batch 11: product 3 in AMBIENT bay 1:A12
+[R06] batch 14: product 17 in CHILLED bay 2:B04
+[R06] batch 15: product 6 in AMBIENT bay 2:D21
+[R06] batch 17: product 10 in AMBIENT bay 3:D21
+[R06] batch 18: product 16 in CHILLED bay 4:B04
+[R06] batch 22: product 1 in CHILLED bay 2:B04
+[R06] batch 23: product 4 in CHILLED bay 3:B04
+[R06] batch 24: product 19 in CHILLED bay 3:B04
+[R06] batch 25: product 4 in CHILLED bay 1:B04
+[R08] delivery 11 exists for PO 7.0 with status SENT
+[R08] delivery 12 exists for PO 8.0 with status SENT
+[R09] invoice 6 bills delivery 6, a stock transfer with no PO
+[R09] invoice 9 bills delivery 9, a stock transfer with no PO
+[R10] invoice 1: amount 2382.56, accepted units x cost = 133.8
+[R10] invoice 2: amount 2482.25, accepted units x cost = 340.5
+[R10] invoice 3: amount 1257.69, accepted units x cost = 1130.64
+[R10] invoice 4: amount 570.95, accepted units x cost = 658.2
+[R10] invoice 5: amount 3652.52, accepted units x cost = 436.08
+[R10] invoice 6: amount 2980.9, accepted units x cost = 368.4
+[R10] invoice 7: amount 943.09, accepted units x cost = 918.36
+[R10] invoice 8: amount 2666.28, accepted units x cost = 755.16
+[R10] invoice 9: amount 3021.0, accepted units x cost = 1202.92
+[R11] disruption 1 (2026-02-03 to 2026-02-11) delays delivery 2, scheduled 2026-01-12
+[R11] disruption 1 (2026-02-03 to 2026-02-11) delays delivery 3, scheduled 2026-02-01
+[R11] disruption 1 (2026-02-03 to 2026-02-11) delays delivery 5, scheduled 2026-03-04
+[R11] disruption 2 (2026-04-18 to 2026-04-21) delays delivery 7, scheduled 2026-03-26
+[R11] disruption 3 (2026-06-09 to ongoing) delays delivery 11, scheduled 2026-05-02
+[R12] PO 1 line 1: no agreement for supplier 1, product 11, store 1 on 2026-01-12
+[R12] PO 2 line 1: no agreement for supplier 2, product 8, store 2 on 2026-01-29
+[R12] PO 3 line 1: no agreement for supplier 3, product 19, store 1 on 2026-02-15
+[R12] PO 3 line 2: no agreement for supplier 3, product 16, store 1 on 2026-02-15
+[R12] PO 3 line 3: no agreement for supplier 3, product 15, store 1 on 2026-02-15
+[R12] PO 4 line 1: no agreement for supplier 5, product 20, store 3 on 2026-03-04
+[R12] PO 5 line 1: no agreement for supplier 1, product 10, store 2 on 2026-03-21
+[R12] PO 6 line 1: no agreement for supplier 4, product 1, store 1 on 2026-04-07
+[R12] PO 6 line 2: no agreement for supplier 4, product 11, store 1 on 2026-04-07
+[R12] PO 6 line 3: no agreement for supplier 4, product 13, store 1 on 2026-04-07
+[R12] PO 7 line 1: no agreement for supplier 7, product 12, store 4 on 2026-04-24
+[R12] PO 7 line 2: no agreement for supplier 7, product 17, store 4 on 2026-04-24
+[R12] PO 8 line 1: no agreement for supplier 2, product 3, store 3 on 2026-05-11
+[R12] PO 8 line 2: no agreement for supplier 2, product 18, store 3 on 2026-05-11
+[R12] PO 9 line 1: no agreement for supplier 6, product 15, store 2 on 2026-05-28
+[R12] PO 9 line 2: no agreement for supplier 6, product 19, store 2 on 2026-05-28
+[R12] PO 10 line 1: no agreement for supplier 8, product 12, store 1 on 2026-06-14
+[R14] sale 1 line 2 (batch 9): sold at store 3, batch shelved at store 2
+[R14] sale 2 line 2 (batch 25): sold at store 3, batch shelved at store 1
+[R14] sale 3 line 1 (batch 18): sold at store 3, batch shelved at store 4
+[R14] sale 4 line 1 (batch 21): sold at store 1, batch shelved at store 3
+[R14] sale 4 line 2 (batch 10): sold at store 1, batch shelved at store 3
+[R14] sale 4 line 3 (batch 14): sold at store 1, batch shelved at store 2
+[R14] sale 5 line 1 (batch 25): sold at store 2, batch shelved at store 1
+[R14] sale 6 line 1 (batch 5): sold at store 2, batch shelved at store 1
+[R14] sale 7 line 2 (batch 18): sold at store 3, batch shelved at store 4
+[R14] sale 8 line 1 (batch 16): sold at store 3, batch shelved at store 4
+[R14] sale 9 line 1 (batch 18): sold at store 2, batch shelved at store 4
+[R14] sale 10 line 1 (batch 16): sold at store 3, batch shelved at store 4
+[R14] sale 10 line 2 (batch 19): sold at store 3, batch shelved at store 4
+[R14] sale 10 line 3 (batch 7): sold at store 3, batch shelved at store 4
+[R14] sale 11 line 1 (batch 21): sold at store 4, batch shelved at store 3
+[R14] sale 12 line 1 (batch 18): sold at store 1, batch shelved at store 4
+[R14] sale 13 line 1 (batch 4): sold at store 3, batch shelved at store 2
+[R14] sale 13 line 2 (batch 5): sold at store 3, batch shelved at store 1
+[R14] sale 13 line 3 (batch 13): sold at store 3, batch shelved at store 1
+[R14] sale 15 line 2 (batch 14): sold at store 3, batch shelved at store 2
+[R14] sale 15 line 3 (batch 25): sold at store 3, batch shelved at store 1
+[R14] sale 19 line 1 (batch 12): sold at store 4, batch shelved at store 1
+[R14] sale 19 line 2 (batch 3): sold at store 4, batch shelved at store 3
+[R14] sale 20 line 2 (batch 16): sold at store 3, batch shelved at store 4
+[R15] sale 2 line 2 (batch 25): sold 2026-05-11, received 2026-05-14
+[R15] sale 10 line 2 (batch 19): sold 2026-04-21, received 2026-05-17
+[R15] sale 17 line 3 (batch 11): sold 2026-05-12, received 2026-06-16
+[R15] sale 19 line 1 (batch 12): sold 2026-03-27, received 2026-06-16
+[R15] sale 19 line 3 (batch 16): sold 2026-03-27, received 2026-03-28
+[R16] sale 1 line 1 (batch 17): sold 2026-07-16, use by 2026-04-18
+[R16] sale 4 line 1 (batch 21): sold 2026-04-13, use by 2026-02-11
+[R16] sale 5 line 1 (batch 25): sold 2026-05-23, use by 2026-05-21
+[R16] sale 6 line 2 (batch 1): sold 2026-07-10, use by 2026-02-01
+[R16] sale 7 line 1 (batch 3): sold 2026-07-25, use by 2026-01-23
+[R16] sale 7 line 3 (batch 21): sold 2026-07-25, use by 2026-02-11
+[R16] sale 10 line 3 (batch 7): sold 2026-04-21, use by 2026-03-04
+[R16] sale 11 line 1 (batch 21): sold 2026-04-25, use by 2026-02-11
+[R16] sale 13 line 1 (batch 4): sold 2026-07-11, use by 2026-02-19
+[R16] sale 15 line 1 (batch 21): sold 2026-05-14, use by 2026-02-11
+[R16] sale 16 line 1 (batch 1): sold 2026-08-26, use by 2026-02-01
+[R16] sale 17 line 1 (batch 20): sold 2026-05-12, use by 2026-02-06
+[R16] sale 18 line 1 (batch 12): sold 2026-08-12, use by 2026-06-19
+[R16] sale 19 line 2 (batch 3): sold 2026-03-27, use by 2026-01-23
+[R17] sale 10 line 2 (batch 19): markdown 8 is batch 19 at 2026-05-30 16:30:00 for 22.4; line sold 2026-04-21 13:44:00 at 22.4
+[R17] sale 17 line 3 (batch 11): markdown 5 is batch 11 at 2026-06-29 16:30:00 for 2.4; line sold 2026-05-12 13:29:00 at 2.4
+[R17] sale 19 line 1 (batch 12): markdown 6 is batch 12 at 2026-06-18 16:30:00 for 3.75; line sold 2026-03-27 16:17:00 at 3.75
+[R19] write off 1 EXPIRED on 2026-01-19, batch 2 use by nan
+[R21] count 1 on 2026-03-31 counts batch 18 on shelf 2026-05-17 to nan
+[R21] count 1 on 2026-03-31 counts batch 17 on shelf 2026-04-13 to 2026-04-18
+[R21] count 1 on 2026-03-31 counts batch 7 on shelf 2026-02-18 to 2026-03-04
+[R21] count 2 on 2026-05-15 counts batch 11 on shelf 2026-06-16 to 2026-06-30
+[R21] count 2 on 2026-05-15 counts batch 13 on shelf 2026-06-16 to nan
+[R21] count 3 on 2026-06-30 counts batch 23 on shelf 2026-05-03 to 2026-05-17
+[R21] count 4 on 2026-08-14 counts batch 19 on shelf 2026-05-17 to 2026-05-31
+[R21] count 4 on 2026-08-14 counts batch 21 on shelf 2026-02-01 to 2026-02-11
+[R21] count 4 on 2026-08-14 counts batch 20 on shelf 2026-02-01 to 2026-02-06
+[R22] count 1 batch 7: counted 60 > system 59
+[R22] count 2 batch 11: counted 59 > system 58

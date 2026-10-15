@@ -1,0 +1,5 @@
+store_id,store_name,street,suburb,postcode,region,opened_date,last_full_stocktake
+1,Darwin City,12 Smith Street,Darwin City,0800,Top End,2011-03-14,
+2,Casuarina,247 Trower Road,Casuarina,0810,Top End,2008-09-02,2026-06-30
+3,Palmerston,5 Temple Terrace,Palmerston City,0830,Top End,2015-11-20,2026-06-30
+4,Alice Springs,61 Hartley Street,Alice Springs,0870,Central,2005-06-08,2026-06-30
