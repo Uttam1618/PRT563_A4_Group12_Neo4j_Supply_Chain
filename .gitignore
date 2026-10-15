@@ -1,0 +1,12 @@
+# System and editor files
+.DS_Store
+~$*
+_pycache_/
+
+# Not part of the submission
+05_screenshots/_superseded_A2_data/
+05_screenshots/report_code/
+06_report/*_preview.pdf
+
+# Combined script, replaced by algorithms_task4.txt and algorithms_task5.txt
+03_cypher/algorithms.txt
