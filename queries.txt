@@ -1,0 +1,203 @@
+// ============================================================================
+//  PRT563 Advanced Data Management, Assessment 4, Group 12
+//  queries.txt : four business use cases on the Neo4j supply chain graph
+//
+//  Target   : Neo4j 2026.09 (Neo4j Desktop), Cypher 25
+//  Requires : the graph built by import.txt (12,727 nodes, 27,681 relationships)
+//
+//  The queries increase in complexity:
+//    Q1  Cold chain breach at receiving     simple        multi hop pattern
+//    Q2  Supplier and DC scorecard          moderate      label expression,
+//                                                         subqueries, dates
+//    Q3  Product recall trace               complex       full text index,
+//                                                         pattern comprehension
+//    Q4  Stock loss ledger by supplier      most complex  conditional sums,
+//                                                         reduce, share of total
+//
+//  Run each query on its own. The expected results were checked against the
+//  CSV data independently, and screenshots of the actual results are in
+//  05_screenshots/task3_queries.
+// ============================================================================
+
+
+// ============================================================================
+//  Q1  COLD CHAIN BREACH AT RECEIVING                              (simple)
+//
+//  Scenario : The quality manager needs the ten worst cases where perishable
+//             stock arrived more than 2 C warmer than its required storage
+//             temperature, with the receiving store and the units QA rejected.
+//  Features : five node types in one pattern, the :Perishable subclass label
+//             (optimisation O1) instead of a join, arithmetic across two
+//             nodes, properties read from the DELIVERED relationship
+//             (optimisation O6), round(), ORDER BY with a tie breaker, LIMIT.
+//  Result   : 10 rows (63 batches breach the rule in total). The worst cases
+//             cluster on 20 to 24 April, the Berrimah DC refrigeration failure.
+// ============================================================================
+MATCH (d:Delivery)-[del:DELIVERED]->(b:StockBatch)-[:OF_PRODUCT]->(p:Perishable),
+      (b)-[:STORED_IN]->(:ShelfBay)-[:LOCATED_IN]->(s:Store)
+WHERE d.tempOnArrivalC - p.storageTempC > 2
+RETURN p.productName                               AS product,
+       b.batchId                                   AS batch,
+       d.deliveryDate                              AS received,
+       s.storeName                                 AS store,
+       d.tempOnArrivalC                            AS arrivedAtC,
+       p.storageTempC                              AS requiredC,
+       round(d.tempOnArrivalC - p.storageTempC, 1) AS excessC,
+       del.deliveredQty                            AS delivered,
+       del.rejectedQty                             AS rejected
+ORDER BY excessC DESC, batch
+LIMIT 10;
+
+
+// ============================================================================
+//  Q2  SUPPLIER AND DC DELIVERY SCORECARD                          (moderate)
+//
+//  Scenario : Quarterly review of every consignor that delivers to the
+//             stores: units delivered and rejected, on time rate against each
+//             purchase order's required date, disruption delay, and a rating.
+//  Features : label expression Supplier|DistributionCentre (optimisation O2
+//             replaces the CONSIGNOR table and two outer joins), CALL (d) {}
+//             subqueries that stop row multiplication and double counting,
+//             OPTIONAL MATCH, duration.inDays(), conditional count, count()
+//             skipping nulls so stock transfers drop out of the on time
+//             measure, coalesce(), labels(), CASE rating rule.
+//  Result   : 7 rows. The interstate routes (Adelaide National DC and
+//             Nationwide) have the lowest on time rates and the most
+//             disruption delay.
+// ============================================================================
+MATCH (d:Delivery)-[:CONSIGNED_BY]->(c:Supplier|DistributionCentre)
+CALL (d) {
+  MATCH (d)-[r:DELIVERED]->(:StockBatch)
+  RETURN sum(r.deliveredQty) AS delivered, sum(r.rejectedQty) AS rejected
+}
+CALL (d) {
+  OPTIONAL MATCH (:SupplyDisruption)-[a:AFFECTS]->(d)
+  RETURN sum(a.delayDays) AS delayDays
+}
+OPTIONAL MATCH (d)-[:FULFILS]->(po:PurchaseOrder)
+WITH c, d, delivered, rejected, delayDays,
+     duration.inDays(po.requiredDate, d.deliveryDate).days AS daysLate
+WITH c,
+     count(d)                                  AS deliveries,
+     sum(delivered)                            AS unitsDelivered,
+     sum(rejected)                             AS unitsRejected,
+     count(daysLate)                           AS poDeliveries,
+     count(CASE WHEN daysLate <= 0 THEN 1 END) AS onTime,
+     avg(daysLate)                             AS avgLate,
+     sum(delayDays)                            AS disruptionDelayDays
+WITH c, deliveries, unitsDelivered, unitsRejected, disruptionDelayDays,
+     round(100.0 * unitsRejected / unitsDelivered, 2) AS rejectRatePct,
+     round(100.0 * onTime / poDeliveries, 1)          AS onTimePct,
+     round(avgLate, 2)                                AS avgDaysLate
+RETURN coalesce(c.supplierName, c.dcName) AS consignor,
+       labels(c)[0]                       AS type,
+       deliveries, unitsDelivered, unitsRejected, rejectRatePct,
+       onTimePct, avgDaysLate, disruptionDelayDays,
+       CASE
+         WHEN rejectRatePct >= 3 THEN 'REVIEW QUALITY'
+         WHEN onTimePct < 70     THEN 'REVIEW TIMELINESS'
+         ELSE 'GOOD'
+       END AS rating
+ORDER BY rejectRatePct DESC, consignor;
+
+
+// ============================================================================
+//  Q3  PRODUCT RECALL TRACE                                        (complex)
+//
+//  Scenario : On 20 July Top End Fresh Produce recalls Baby Spinach supplied
+//             13 to 19 July. The food safety team needs every affected batch,
+//             where it is shelved, the units customers already bought and in
+//             which sales, which buyers can be contacted (ACCOUNT sales), and
+//             the units pulled from the shelf.
+//  Features : full text index search (catalogue_search, built in import.txt
+//             Part 2), a seven hop pattern across the supply chain, chained
+//             date comparison, pattern comprehensions that build lists of
+//             maps and filter with WHERE, list comprehension, reduce().
+//  Result   : 3 rows. 8 units received, 6 sold across 5 sales (one buyer
+//             contactable), 2 pulled. Every batch balances.
+// ============================================================================
+CALL db.index.fulltext.queryNodes('catalogue_search', 'spinach')
+  YIELD node AS p, score
+WHERE p:Product
+MATCH (sup:Supplier {supplierName: 'Top End Fresh Produce'})
+      <-[:PLACED_WITH]-(:PurchaseOrder)<-[:FULFILS]-(d:Delivery)
+      -[:DELIVERED]->(b:StockBatch)-[:OF_PRODUCT]->(p),
+      (b)-[:STORED_IN]->(bay:ShelfBay)-[:LOCATED_IN]->(st:Store)
+WHERE date('2026-07-13') <= b.receivedDate <= date('2026-07-19')
+WITH p, b, bay, st,
+     [(b)<-[:DRAWS_FROM]-(l:SaleLine)<-[:HAS_LINE]-(s:Sale) |
+        {sale: s.saleId, units: l.qtySold, payment: s.paymentMethod}] AS sales,
+     [(b)<-[:WRITES_OFF]-(w:WriteOff) WHERE w.reason = 'RECALL' | w.qty] AS recalled
+RETURN p.productName                                     AS product,
+       b.batchId                                         AS batch,
+       b.receivedDate                                    AS received,
+       st.storeName + ' bay ' + bay.bayCode              AS location,
+       b.qtyReceived                                     AS unitsReceived,
+       reduce(t = 0, x IN sales | t + x.units)           AS unitsSold,
+       [x IN sales | x.sale]                             AS saleIds,
+       [x IN sales WHERE x.payment = 'ACCOUNT' | x.sale] AS contactableSales,
+       reduce(t = 0, q IN recalled | t + q)              AS unitsPulled
+ORDER BY received, batch;
+
+
+// ============================================================================
+//  Q4  WHERE DOES THE MONEY LEAK? STOCK LOSS LEDGER BY SUPPLIER    (most complex)
+//
+//  Scenario : Finance wants, for every supplier, the value bought at cost,
+//             losses from expiry, losses from damage, shrinkage and recall,
+//             revenue given up through markdowns, the total loss as a share
+//             of purchases and of the company's whole loss, and the supplier's
+//             worst product.
+//  Features : conditional sums splitting one set of write offs into separate
+//             cost streams, a three node pattern inside a subquery
+//             (batch, markdown, sale line), two levels of aggregation
+//             (supplier and product, then supplier), reduce() used to find a
+//             maximum, collect() then UNWIND to put the company total beside
+//             every row (the Cypher equivalent of a SQL window function),
+//             maps used as records. Stock transfers have no purchase order
+//             and so no supplier, and are not included.
+//  Result   : 8 rows. Seafood and beef cause 59% of all stock loss while
+//             making up 22% of purchases, ambient suppliers lose 2 to 3%.
+// ============================================================================
+MATCH (sup:Supplier)<-[:PLACED_WITH]-(:PurchaseOrder)<-[:FULFILS]-(:Delivery)
+      -[:DELIVERED]->(b:StockBatch)-[:OF_PRODUCT]->(p:Product)
+CALL (b) {
+  OPTIONAL MATCH (b)<-[:WRITES_OFF]-(w:WriteOff)
+  RETURN sum(CASE WHEN w.reason = 'EXPIRED'  THEN w.qty * b.costPrice ELSE 0 END) AS expiredCost,
+         sum(CASE WHEN w.reason <> 'EXPIRED' THEN w.qty * b.costPrice ELSE 0 END) AS otherCost
+}
+CALL (b) {
+  OPTIONAL MATCH (b)<-[:MARKS_DOWN]-(m:Markdown)-[:APPLIED_TO]->(l:SaleLine)
+  RETURN sum((m.originalPrice - l.unitPriceCharged) * l.qtySold) AS markdownCost
+}
+WITH sup, p,
+     sum(b.qtyReceived * b.costPrice) AS productBought,
+     sum(expiredCost)                 AS productExpired,
+     sum(otherCost)                   AS productOther,
+     sum(markdownCost)                AS productMarkdown
+WITH sup,
+     sum(productBought)   AS bought,
+     sum(productExpired)  AS expired,
+     sum(productOther)    AS other,
+     sum(productMarkdown) AS markdown,
+     collect({product: p.productName,
+              loss: productExpired + productOther + productMarkdown}) AS products
+WITH sup, bought, expired, other, markdown,
+     expired + other + markdown AS loss,
+     reduce(top = null, x IN products |
+            CASE WHEN top IS NULL OR x.loss > top.loss THEN x ELSE top END) AS worst
+WITH collect({supplier: sup.supplierName, bought: bought, expired: expired,
+              other: other, markdown: markdown, loss: loss,
+              worst: worst.product}) AS rows,
+     sum(loss) AS allLoss
+UNWIND rows AS r
+RETURN r.supplier                            AS supplier,
+       round(r.bought, 2)                    AS purchasedAtCost,
+       round(r.expired, 2)                   AS expiredWriteOffs,
+       round(r.other, 2)                     AS damagedShrinkRecall,
+       round(r.markdown, 2)                  AS markdownGiveaway,
+       round(r.loss, 2)                      AS totalLoss,
+       round(100.0 * r.loss / r.bought, 1)   AS lossPctOfPurchases,
+       round(100.0 * r.loss / allLoss, 1)    AS shareOfAllLoss,
+       r.worst                               AS biggestLossProduct
+ORDER BY totalLoss DESC;

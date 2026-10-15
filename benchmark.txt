@@ -1,0 +1,117 @@
+// ============================================================================
+//  PRT563 Advanced Data Management, Assessment 4, Group 12
+//  benchmark.txt : Model A (naive) versus Model B (optimised)
+//
+//  The same seven business questions are asked of both models. Each question
+//  appears twice: the A version runs on database 'modela' (built by
+//  importA.txt) and the B version on database 'neo4j' (built by import.txt).
+//  PROFILE makes Neo4j report the total database hits (db hits), the
+//  standard measure of how much work a query does. Both versions of a
+//  question must return identical answers, which proves the optimised model
+//  lost no information.
+//
+//  Hops per question (relationships traversed):  A total 20,  B total 10
+// ============================================================================
+
+
+// ---- B1  Shelf life of every perishable batch            A 2 hops, B 1 hop
+// Expected: batches 1510, avgShelfLife 10.941
+// [modela]
+PROFILE
+MATCH (b:StockBatch)-[:STOCK_BATCH_PRODUCT]->(:Product)<-[:PERISHABLE_PRODUCT_PRODUCT]-(pp:PerishableProduct)
+RETURN count(b) AS batches, round(avg(pp.shelf_life_days), 3) AS avgShelfLife;
+// [neo4j]
+PROFILE
+MATCH (b:StockBatch)-[:OF_PRODUCT]->(p:Perishable)
+RETURN count(b) AS batches, round(avg(p.shelfLifeDays), 3) AS avgShelfLife;
+
+
+// ---- B2  Which supplier consigned each batch            A 4 hops, B 2 hops
+// Expected: Arafura Seafoods 78, Darwin Bakehouse 421,
+//           Nationwide Grocery Wholesale 172, Territory Dairy Co 335,
+//           Top End Fresh Produce 303
+// [modela]
+PROFILE
+MATCH (b:StockBatch)-[:STOCK_BATCH_DELIVERY_LINE]->(:DeliveryLine)-[:DELIVERY_LINE_DELIVERY]->(:Delivery)
+      -[:DELIVERY_CONSIGNOR]->(:Consignor)<-[:SUPPLIER_CONSIGNOR]-(s:Supplier)
+RETURN s.supplier_name AS supplier, count(b) AS batches ORDER BY supplier;
+// [neo4j]
+PROFILE
+MATCH (b:StockBatch)<-[:DELIVERED]-(:Delivery)-[:CONSIGNED_BY]->(s:Supplier)
+RETURN s.supplierName AS supplier, count(b) AS batches ORDER BY supplier;
+
+
+// ---- B3  Stock count variance                            A 2 hops, B 1 hop
+// Expected: countLines 316, unitsShort 53
+// [modela]
+PROFILE
+MATCH (:StockCount)<-[:BATCH_COUNT_STOCK_COUNT]-(bc:BatchCount)-[:BATCH_COUNT_STOCK_BATCH]->(:StockBatch)
+RETURN count(bc) AS countLines, sum(bc.system_qty - bc.counted_qty) AS unitsShort;
+// [neo4j]
+PROFILE
+MATCH (:StockCount)-[c:COUNTED]->(:StockBatch)
+RETURN count(c) AS countLines, sum(c.systemQty - c.countedQty) AS unitsShort;
+
+
+// ---- B4  Deliveries delayed by each disruption           A 2 hops, B 1 hop
+// Expected: disruption 1 = 5 deliveries and 41 days, 2 = 3 and 7, 3 = 19 and 28
+// [modela]
+PROFILE
+MATCH (x:SupplyDisruption)<-[:DISRUPTION_IMPACT_SUPPLY_DISRUPTION]-(di:DisruptionImpact)
+      -[:DISRUPTION_IMPACT_DELIVERY]->(:Delivery)
+RETURN x.disruption_id AS disruption, count(di) AS deliveries, sum(di.delay_days) AS delayDays
+ORDER BY disruption;
+// [neo4j]
+PROFILE
+MATCH (x:SupplyDisruption)-[a:AFFECTS]->(:Delivery)
+RETURN x.disruptionId AS disruption, count(a) AS deliveries, sum(a.delayDays) AS delayDays
+ORDER BY disruption;
+
+
+// ---- B5  Five most ordered products                      A 2 hops, B 1 hop
+// Expected: Full Cream Milk 921, White Sandwich Loaf 670, Tomatoes Truss 487,
+//           Jasmine Rice 444, Bananas Cavendish 414
+// [modela]
+PROFILE
+MATCH (:PurchaseOrder)<-[:PO_LINE_PURCHASE_ORDER]-(l:PoLine)-[:PO_LINE_PRODUCT]->(p:Product)
+RETURN p.product_name AS product, sum(l.ordered_qty) AS orderedQty
+ORDER BY orderedQty DESC LIMIT 5;
+// [neo4j]
+PROFILE
+MATCH (:PurchaseOrder)-[o:ORDERS]->(p:Product)
+RETURN p.productName AS product, sum(o.orderedQty) AS orderedQty
+ORDER BY orderedQty DESC LIMIT 5;
+
+
+// ---- B6  Who authorised write offs, and their phones     A 3 hops, B 1 hop
+// Expected: Hamish Beecroft 94, Marika Yunupingu 295, Priya Raman 125,
+//           with their phone numbers. In Model A each phone node multiplies
+//           the rows, so DISTINCT is needed to count write offs correctly.
+// [modela]
+PROFILE
+MATCH (w:WriteOff)-[:WRITE_OFF_DUTY_MANAGER]->(:DutyManager)-[:DUTY_MANAGER_EMPLOYEE]->(e:Employee)
+      <-[:EMPLOYEE_PHONE_EMPLOYEE]-(ph:EmployeePhone)
+RETURN e.first_name + ' ' + e.last_name AS manager,
+       count(DISTINCT w) AS writeOffs, collect(DISTINCT ph.phone) AS phones
+ORDER BY manager;
+// [neo4j]
+PROFILE
+MATCH (w:WriteOff)-[:AUTHORISED_BY]->(e:Employee)
+RETURN e.firstName + ' ' + e.lastName AS manager, count(w) AS writeOffs, e.phones AS phones
+ORDER BY manager;
+
+
+// ---- B7  Units sold, traced back to the consigning supplier   A 5, B 3 hops
+// Expected: Arafura Seafoods 51, Darwin Bakehouse 753,
+//           Nationwide Grocery Wholesale 1182, Territory Dairy Co 1227,
+//           Top End Fresh Produce 736
+// [modela]
+PROFILE
+MATCH (l:SaleLine)-[:SALE_LINE_STOCK_BATCH]->(:StockBatch)-[:STOCK_BATCH_DELIVERY_LINE]->(:DeliveryLine)
+      -[:DELIVERY_LINE_DELIVERY]->(:Delivery)-[:DELIVERY_CONSIGNOR]->(:Consignor)
+      <-[:SUPPLIER_CONSIGNOR]-(s:Supplier)
+RETURN s.supplier_name AS supplier, sum(l.qty_sold) AS unitsSold ORDER BY supplier;
+// [neo4j]
+PROFILE
+MATCH (l:SaleLine)-[:DRAWS_FROM]->(:StockBatch)<-[:DELIVERED]-(:Delivery)-[:CONSIGNED_BY]->(s:Supplier)
+RETURN s.supplierName AS supplier, sum(l.qtySold) AS unitsSold ORDER BY supplier;

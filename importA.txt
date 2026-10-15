@@ -1,0 +1,466 @@
+// ============================================================================
+//  PRT563 Advanced Data Management, Assessment 4, Group 12
+//  importA.txt : the NAIVE graph model (Model A), built only for the
+//                Model A versus Model B performance experiment
+//
+//  Rules applied mechanically: one label per table (29), one node per row,
+//  every column a property (foreign key columns kept), one relationship type
+//  per foreign key (38), named CHILDTABLE_PARENTTABLE, pointing child to parent.
+//  Result   : 16,786 nodes, 31,740 relationships
+//
+//  Run in a SEPARATE database so that Model B (database neo4j) is untouched:
+//    1. Choose the 'system' database in the Database menu and run
+//         CREATE DATABASE modela IF NOT EXISTS
+//    2. Choose 'modela' in the Database menu, then run this file.
+//  It reads the same 29 CSV files from the instance import folder.
+// ============================================================================
+
+// ---- PART 1  Constraints and indexes on every table key ---------------------
+CREATE CONSTRAINT a_consignor IF NOT EXISTS FOR (n:Consignor) REQUIRE n.consignor_id IS UNIQUE;
+CREATE CONSTRAINT a_supplier IF NOT EXISTS FOR (n:Supplier) REQUIRE n.supplier_id IS UNIQUE;
+CREATE CONSTRAINT a_distribution_centre IF NOT EXISTS FOR (n:DistributionCentre) REQUIRE n.dc_id IS UNIQUE;
+CREATE CONSTRAINT a_store IF NOT EXISTS FOR (n:Store) REQUIRE n.store_id IS UNIQUE;
+CREATE CONSTRAINT a_product_category IF NOT EXISTS FOR (n:ProductCategory) REQUIRE n.category_id IS UNIQUE;
+CREATE CONSTRAINT a_product IF NOT EXISTS FOR (n:Product) REQUIRE n.product_id IS UNIQUE;
+CREATE CONSTRAINT a_perishable_product IF NOT EXISTS FOR (n:PerishableProduct) REQUIRE n.product_id IS UNIQUE;
+CREATE CONSTRAINT a_ambient_product IF NOT EXISTS FOR (n:AmbientProduct) REQUIRE n.product_id IS UNIQUE;
+CREATE CONSTRAINT a_employee IF NOT EXISTS FOR (n:Employee) REQUIRE n.employee_id IS UNIQUE;
+CREATE INDEX a_employee_phone IF NOT EXISTS FOR (n:EmployeePhone) ON (n.employee_id, n.phone);
+CREATE CONSTRAINT a_ordering_officer IF NOT EXISTS FOR (n:OrderingOfficer) REQUIRE n.employee_id IS UNIQUE;
+CREATE CONSTRAINT a_replenishment_assistant IF NOT EXISTS FOR (n:ReplenishmentAssistant) REQUIRE n.employee_id IS UNIQUE;
+CREATE CONSTRAINT a_duty_manager IF NOT EXISTS FOR (n:DutyManager) REQUIRE n.employee_id IS UNIQUE;
+CREATE CONSTRAINT a_purchase_order IF NOT EXISTS FOR (n:PurchaseOrder) REQUIRE n.po_id IS UNIQUE;
+CREATE INDEX a_po_line IF NOT EXISTS FOR (n:PoLine) ON (n.po_id, n.line_no);
+CREATE CONSTRAINT a_delivery IF NOT EXISTS FOR (n:Delivery) REQUIRE n.delivery_id IS UNIQUE;
+CREATE INDEX a_delivery_line IF NOT EXISTS FOR (n:DeliveryLine) ON (n.delivery_id, n.line_no);
+CREATE CONSTRAINT a_invoice IF NOT EXISTS FOR (n:Invoice) REQUIRE n.invoice_id IS UNIQUE;
+CREATE CONSTRAINT a_supply_disruption IF NOT EXISTS FOR (n:SupplyDisruption) REQUIRE n.disruption_id IS UNIQUE;
+CREATE INDEX a_disruption_impact IF NOT EXISTS FOR (n:DisruptionImpact) ON (n.disruption_id, n.delivery_id);
+CREATE INDEX a_shelf_bay IF NOT EXISTS FOR (n:ShelfBay) ON (n.store_id, n.bay_code);
+CREATE CONSTRAINT a_stock_batch IF NOT EXISTS FOR (n:StockBatch) REQUIRE n.batch_id IS UNIQUE;
+CREATE CONSTRAINT a_stock_count IF NOT EXISTS FOR (n:StockCount) REQUIRE n.count_id IS UNIQUE;
+CREATE INDEX a_batch_count IF NOT EXISTS FOR (n:BatchCount) ON (n.count_id, n.batch_id);
+CREATE CONSTRAINT a_markdown IF NOT EXISTS FOR (n:Markdown) REQUIRE n.markdown_id IS UNIQUE;
+CREATE CONSTRAINT a_sale IF NOT EXISTS FOR (n:Sale) REQUIRE n.sale_id IS UNIQUE;
+CREATE INDEX a_sale_line IF NOT EXISTS FOR (n:SaleLine) ON (n.sale_id, n.line_no);
+CREATE CONSTRAINT a_write_off IF NOT EXISTS FOR (n:WriteOff) REQUIRE n.writeoff_id IS UNIQUE;
+CREATE INDEX a_supply_agreement IF NOT EXISTS FOR (n:SupplyAgreement) ON (n.supplier_id, n.product_id, n.store_id, n.valid_from);
+
+// ---- PART 2  Nodes and foreign key relationships, parents before children --
+// Each row becomes one node. Each foreign key is joined in its own unit
+// subquery. An empty foreign key converts to null and simply matches nothing.
+
+// consignor
+LOAD CSV WITH HEADERS FROM 'file:///consignor.csv' AS row
+CREATE (c:Consignor)
+SET c.consignor_id = toInteger(nullIf(row.consignor_id, '')),
+    c.default_lead_time_days = toInteger(nullIf(row.default_lead_time_days, ''));
+
+// supplier
+LOAD CSV WITH HEADERS FROM 'file:///supplier.csv' AS row
+CREATE (c:Supplier)
+SET c.supplier_id = toInteger(nullIf(row.supplier_id, '')),
+    c.supplier_name = nullIf(row.supplier_name, ''),
+    c.abn_number = nullIf(row.abn_number, ''),
+    c.contact_email = nullIf(row.contact_email, ''),
+    c.is_local_nt = toInteger(nullIf(row.is_local_nt, '')),
+    c.consignor_id = toInteger(nullIf(row.consignor_id, ''))
+CALL (c, row) {
+  MATCH (p:Consignor {consignor_id: toInteger(nullIf(row.consignor_id, ''))})
+  CREATE (c)-[:SUPPLIER_CONSIGNOR]->(p)
+};
+
+// distribution_centre
+LOAD CSV WITH HEADERS FROM 'file:///distribution_centre.csv' AS row
+CREATE (c:DistributionCentre)
+SET c.dc_id = toInteger(nullIf(row.dc_id, '')),
+    c.dc_name = nullIf(row.dc_name, ''),
+    c.city = nullIf(row.city, ''),
+    c.state = nullIf(row.state, ''),
+    c.consignor_id = toInteger(nullIf(row.consignor_id, ''))
+CALL (c, row) {
+  MATCH (p:Consignor {consignor_id: toInteger(nullIf(row.consignor_id, ''))})
+  CREATE (c)-[:DISTRIBUTION_CENTRE_CONSIGNOR]->(p)
+};
+
+// store
+LOAD CSV WITH HEADERS FROM 'file:///store.csv' AS row
+CREATE (c:Store)
+SET c.store_id = toInteger(nullIf(row.store_id, '')),
+    c.store_name = nullIf(row.store_name, ''),
+    c.street = nullIf(row.street, ''),
+    c.suburb = nullIf(row.suburb, ''),
+    c.postcode = nullIf(row.postcode, ''),
+    c.region = nullIf(row.region, ''),
+    c.opened_date = date(nullIf(row.opened_date, '')),
+    c.last_full_stocktake = date(nullIf(row.last_full_stocktake, ''));
+
+// product_category
+LOAD CSV WITH HEADERS FROM 'file:///product_category.csv' AS row
+CREATE (c:ProductCategory)
+SET c.category_id = toInteger(nullIf(row.category_id, '')),
+    c.category_name = nullIf(row.category_name, ''),
+    c.department = nullIf(row.department, '');
+
+// product
+LOAD CSV WITH HEADERS FROM 'file:///product.csv' AS row
+CREATE (c:Product)
+SET c.product_id = toInteger(nullIf(row.product_id, '')),
+    c.barcode = nullIf(row.barcode, ''),
+    c.product_name = nullIf(row.product_name, ''),
+    c.unit_of_measure = nullIf(row.unit_of_measure, ''),
+    c.pack_size = nullIf(row.pack_size, ''),
+    c.current_retail_price = toFloat(nullIf(row.current_retail_price, '')),
+    c.product_type = nullIf(row.product_type, ''),
+    c.category_id = toInteger(nullIf(row.category_id, ''))
+CALL (c, row) {
+  MATCH (p:ProductCategory {category_id: toInteger(nullIf(row.category_id, ''))})
+  CREATE (c)-[:PRODUCT_PRODUCT_CATEGORY]->(p)
+};
+
+// perishable_product
+LOAD CSV WITH HEADERS FROM 'file:///perishable_product.csv' AS row
+CREATE (c:PerishableProduct)
+SET c.product_id = toInteger(nullIf(row.product_id, '')),
+    c.shelf_life_days = toInteger(nullIf(row.shelf_life_days, '')),
+    c.storage_temp_c = toFloat(nullIf(row.storage_temp_c, '')),
+    c.markdown_trigger_days = toInteger(nullIf(row.markdown_trigger_days, ''))
+CALL (c, row) {
+  MATCH (p:Product {product_id: toInteger(nullIf(row.product_id, ''))})
+  CREATE (c)-[:PERISHABLE_PRODUCT_PRODUCT]->(p)
+};
+
+// ambient_product
+LOAD CSV WITH HEADERS FROM 'file:///ambient_product.csv' AS row
+CREATE (c:AmbientProduct)
+SET c.product_id = toInteger(nullIf(row.product_id, '')),
+    c.min_stock_cover_days = toInteger(nullIf(row.min_stock_cover_days, ''))
+CALL (c, row) {
+  MATCH (p:Product {product_id: toInteger(nullIf(row.product_id, ''))})
+  CREATE (c)-[:AMBIENT_PRODUCT_PRODUCT]->(p)
+};
+
+// employee
+LOAD CSV WITH HEADERS FROM 'file:///employee.csv' AS row
+CREATE (c:Employee)
+SET c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.first_name = nullIf(row.first_name, ''),
+    c.last_name = nullIf(row.last_name, ''),
+    c.date_of_birth = date(nullIf(row.date_of_birth, '')),
+    c.hire_date = date(nullIf(row.hire_date, ''));
+
+// employee_phone
+LOAD CSV WITH HEADERS FROM 'file:///employee_phone.csv' AS row
+CREATE (c:EmployeePhone)
+SET c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.phone = nullIf(row.phone, '')
+CALL (c, row) {
+  MATCH (p:Employee {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:EMPLOYEE_PHONE_EMPLOYEE]->(p)
+};
+
+// ordering_officer
+LOAD CSV WITH HEADERS FROM 'file:///ordering_officer.csv' AS row
+CREATE (c:OrderingOfficer)
+SET c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.ordering_limit_aud = toFloat(nullIf(row.ordering_limit_aud, ''))
+CALL (c, row) {
+  MATCH (p:Employee {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:ORDERING_OFFICER_EMPLOYEE]->(p)
+};
+
+// replenishment_assistant
+LOAD CSV WITH HEADERS FROM 'file:///replenishment_assistant.csv' AS row
+CREATE (c:ReplenishmentAssistant)
+SET c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.assigned_aisle = nullIf(row.assigned_aisle, '')
+CALL (c, row) {
+  MATCH (p:Employee {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:REPLENISHMENT_ASSISTANT_EMPLOYEE]->(p)
+};
+
+// duty_manager
+LOAD CSV WITH HEADERS FROM 'file:///duty_manager.csv' AS row
+CREATE (c:DutyManager)
+SET c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.approval_limit_aud = toFloat(nullIf(row.approval_limit_aud, ''))
+CALL (c, row) {
+  MATCH (p:Employee {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:DUTY_MANAGER_EMPLOYEE]->(p)
+};
+
+// purchase_order
+LOAD CSV WITH HEADERS FROM 'file:///purchase_order.csv' AS row
+CREATE (c:PurchaseOrder)
+SET c.po_id = toInteger(nullIf(row.po_id, '')),
+    c.order_date = date(nullIf(row.order_date, '')),
+    c.required_date = date(nullIf(row.required_date, '')),
+    c.po_status = nullIf(row.po_status, ''),
+    c.supplier_id = toInteger(nullIf(row.supplier_id, '')),
+    c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.store_id = toInteger(nullIf(row.store_id, ''))
+CALL (c, row) {
+  MATCH (p:Supplier {supplier_id: toInteger(nullIf(row.supplier_id, ''))})
+  CREATE (c)-[:PURCHASE_ORDER_SUPPLIER]->(p)
+}
+CALL (c, row) {
+  MATCH (p:OrderingOfficer {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:PURCHASE_ORDER_ORDERING_OFFICER]->(p)
+}
+CALL (c, row) {
+  MATCH (p:Store {store_id: toInteger(nullIf(row.store_id, ''))})
+  CREATE (c)-[:PURCHASE_ORDER_STORE]->(p)
+};
+
+// po_line
+LOAD CSV WITH HEADERS FROM 'file:///po_line.csv' AS row
+CREATE (c:PoLine)
+SET c.po_id = toInteger(nullIf(row.po_id, '')),
+    c.line_no = toInteger(nullIf(row.line_no, '')),
+    c.product_id = toInteger(nullIf(row.product_id, '')),
+    c.ordered_qty = toInteger(nullIf(row.ordered_qty, '')),
+    c.agreed_unit_cost = toFloat(nullIf(row.agreed_unit_cost, ''))
+CALL (c, row) {
+  MATCH (p:PurchaseOrder {po_id: toInteger(nullIf(row.po_id, ''))})
+  CREATE (c)-[:PO_LINE_PURCHASE_ORDER]->(p)
+}
+CALL (c, row) {
+  MATCH (p:Product {product_id: toInteger(nullIf(row.product_id, ''))})
+  CREATE (c)-[:PO_LINE_PRODUCT]->(p)
+};
+
+// delivery
+LOAD CSV WITH HEADERS FROM 'file:///delivery.csv' AS row
+CREATE (c:Delivery)
+SET c.delivery_id = toInteger(nullIf(row.delivery_id, '')),
+    c.delivery_date = date(nullIf(row.delivery_date, '')),
+    c.consignment_note = nullIf(row.consignment_note, ''),
+    c.temp_on_arrival_c = toFloat(nullIf(row.temp_on_arrival_c, '')),
+    c.consignor_id = toInteger(nullIf(row.consignor_id, '')),
+    c.po_id = toInteger(nullIf(row.po_id, ''))
+CALL (c, row) {
+  MATCH (p:Consignor {consignor_id: toInteger(nullIf(row.consignor_id, ''))})
+  CREATE (c)-[:DELIVERY_CONSIGNOR]->(p)
+}
+CALL (c, row) {
+  MATCH (p:PurchaseOrder {po_id: toInteger(nullIf(row.po_id, ''))})
+  CREATE (c)-[:DELIVERY_PURCHASE_ORDER]->(p)
+};
+
+// delivery_line
+LOAD CSV WITH HEADERS FROM 'file:///delivery_line.csv' AS row
+CREATE (c:DeliveryLine)
+SET c.delivery_id = toInteger(nullIf(row.delivery_id, '')),
+    c.line_no = toInteger(nullIf(row.line_no, '')),
+    c.delivered_qty = toInteger(nullIf(row.delivered_qty, '')),
+    c.rejected_qty = toInteger(nullIf(row.rejected_qty, ''))
+CALL (c, row) {
+  MATCH (p:Delivery {delivery_id: toInteger(nullIf(row.delivery_id, ''))})
+  CREATE (c)-[:DELIVERY_LINE_DELIVERY]->(p)
+};
+
+// invoice
+LOAD CSV WITH HEADERS FROM 'file:///invoice.csv' AS row
+CREATE (c:Invoice)
+SET c.invoice_id = toInteger(nullIf(row.invoice_id, '')),
+    c.invoice_date = date(nullIf(row.invoice_date, '')),
+    c.amount_ex_gst = toFloat(nullIf(row.amount_ex_gst, '')),
+    c.gst_amount = toFloat(nullIf(row.gst_amount, '')),
+    c.due_date = date(nullIf(row.due_date, '')),
+    c.delivery_id = toInteger(nullIf(row.delivery_id, ''))
+CALL (c, row) {
+  MATCH (p:Delivery {delivery_id: toInteger(nullIf(row.delivery_id, ''))})
+  CREATE (c)-[:INVOICE_DELIVERY]->(p)
+};
+
+// supply_disruption
+LOAD CSV WITH HEADERS FROM 'file:///supply_disruption.csv' AS row
+CREATE (c:SupplyDisruption)
+SET c.disruption_id = toInteger(nullIf(row.disruption_id, '')),
+    c.start_date = date(nullIf(row.start_date, '')),
+    c.end_date = date(nullIf(row.end_date, '')),
+    c.cause = nullIf(row.cause, ''),
+    c.severity = nullIf(row.severity, '');
+
+// disruption_impact
+LOAD CSV WITH HEADERS FROM 'file:///disruption_impact.csv' AS row
+CREATE (c:DisruptionImpact)
+SET c.disruption_id = toInteger(nullIf(row.disruption_id, '')),
+    c.delivery_id = toInteger(nullIf(row.delivery_id, '')),
+    c.delay_days = toInteger(nullIf(row.delay_days, ''))
+CALL (c, row) {
+  MATCH (p:SupplyDisruption {disruption_id: toInteger(nullIf(row.disruption_id, ''))})
+  CREATE (c)-[:DISRUPTION_IMPACT_SUPPLY_DISRUPTION]->(p)
+}
+CALL (c, row) {
+  MATCH (p:Delivery {delivery_id: toInteger(nullIf(row.delivery_id, ''))})
+  CREATE (c)-[:DISRUPTION_IMPACT_DELIVERY]->(p)
+};
+
+// shelf_bay
+LOAD CSV WITH HEADERS FROM 'file:///shelf_bay.csv' AS row
+CREATE (c:ShelfBay)
+SET c.store_id = toInteger(nullIf(row.store_id, '')),
+    c.bay_code = nullIf(row.bay_code, ''),
+    c.aisle_code = nullIf(row.aisle_code, ''),
+    c.capacity_facings = toInteger(nullIf(row.capacity_facings, '')),
+    c.temp_zone = nullIf(row.temp_zone, '')
+CALL (c, row) {
+  MATCH (p:Store {store_id: toInteger(nullIf(row.store_id, ''))})
+  CREATE (c)-[:SHELF_BAY_STORE]->(p)
+};
+
+// stock_batch
+LOAD CSV WITH HEADERS FROM 'file:///stock_batch.csv' AS row
+CREATE (c:StockBatch)
+SET c.batch_id = toInteger(nullIf(row.batch_id, '')),
+    c.received_date = date(nullIf(row.received_date, '')),
+    c.use_by_date = date(nullIf(row.use_by_date, '')),
+    c.qty_received = toInteger(nullIf(row.qty_received, '')),
+    c.qty_on_hand = toInteger(nullIf(row.qty_on_hand, '')),
+    c.cost_price = toFloat(nullIf(row.cost_price, '')),
+    c.product_id = toInteger(nullIf(row.product_id, '')),
+    c.delivery_id = toInteger(nullIf(row.delivery_id, '')),
+    c.line_no = toInteger(nullIf(row.line_no, '')),
+    c.store_id = toInteger(nullIf(row.store_id, '')),
+    c.bay_code = nullIf(row.bay_code, '')
+CALL (c, row) {
+  MATCH (p:Product {product_id: toInteger(nullIf(row.product_id, ''))})
+  CREATE (c)-[:STOCK_BATCH_PRODUCT]->(p)
+}
+CALL (c, row) {
+  MATCH (p:DeliveryLine {delivery_id: toInteger(nullIf(row.delivery_id, '')), line_no: toInteger(nullIf(row.line_no, ''))})
+  CREATE (c)-[:STOCK_BATCH_DELIVERY_LINE]->(p)
+}
+CALL (c, row) {
+  MATCH (p:ShelfBay {store_id: toInteger(nullIf(row.store_id, '')), bay_code: nullIf(row.bay_code, '')})
+  CREATE (c)-[:STOCK_BATCH_SHELF_BAY]->(p)
+};
+
+// stock_count
+LOAD CSV WITH HEADERS FROM 'file:///stock_count.csv' AS row
+CREATE (c:StockCount)
+SET c.count_id = toInteger(nullIf(row.count_id, '')),
+    c.count_date = date(nullIf(row.count_date, '')),
+    c.count_type = nullIf(row.count_type, ''),
+    c.employee_id = toInteger(nullIf(row.employee_id, ''))
+CALL (c, row) {
+  MATCH (p:Employee {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:STOCK_COUNT_EMPLOYEE]->(p)
+};
+
+// batch_count
+LOAD CSV WITH HEADERS FROM 'file:///batch_count.csv' AS row
+CREATE (c:BatchCount)
+SET c.count_id = toInteger(nullIf(row.count_id, '')),
+    c.batch_id = toInteger(nullIf(row.batch_id, '')),
+    c.counted_qty = toInteger(nullIf(row.counted_qty, '')),
+    c.system_qty = toInteger(nullIf(row.system_qty, ''))
+CALL (c, row) {
+  MATCH (p:StockCount {count_id: toInteger(nullIf(row.count_id, ''))})
+  CREATE (c)-[:BATCH_COUNT_STOCK_COUNT]->(p)
+}
+CALL (c, row) {
+  MATCH (p:StockBatch {batch_id: toInteger(nullIf(row.batch_id, ''))})
+  CREATE (c)-[:BATCH_COUNT_STOCK_BATCH]->(p)
+};
+
+// markdown
+LOAD CSV WITH HEADERS FROM 'file:///markdown.csv' AS row
+CREATE (c:Markdown)
+SET c.markdown_id = toInteger(nullIf(row.markdown_id, '')),
+    c.applied_at = localdatetime(replace(nullIf(row.applied_at, ''), ' ', 'T')),
+    c.original_price = toFloat(nullIf(row.original_price, '')),
+    c.reduced_price = toFloat(nullIf(row.reduced_price, '')),
+    c.reason = nullIf(row.reason, ''),
+    c.employee_id = toInteger(nullIf(row.employee_id, '')),
+    c.batch_id = toInteger(nullIf(row.batch_id, ''))
+CALL (c, row) {
+  MATCH (p:Employee {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:MARKDOWN_EMPLOYEE]->(p)
+}
+CALL (c, row) {
+  MATCH (p:StockBatch {batch_id: toInteger(nullIf(row.batch_id, ''))})
+  CREATE (c)-[:MARKDOWN_STOCK_BATCH]->(p)
+};
+
+// sale
+LOAD CSV WITH HEADERS FROM 'file:///sale.csv' AS row
+CREATE (c:Sale)
+SET c.sale_id = toInteger(nullIf(row.sale_id, '')),
+    c.sale_datetime = localdatetime(replace(nullIf(row.sale_datetime, ''), ' ', 'T')),
+    c.payment_method = nullIf(row.payment_method, ''),
+    c.register_no = toInteger(nullIf(row.register_no, '')),
+    c.store_id = toInteger(nullIf(row.store_id, ''))
+CALL (c, row) {
+  MATCH (p:Store {store_id: toInteger(nullIf(row.store_id, ''))})
+  CREATE (c)-[:SALE_STORE]->(p)
+};
+
+// sale_line
+LOAD CSV WITH HEADERS FROM 'file:///sale_line.csv' AS row
+CREATE (c:SaleLine)
+SET c.sale_id = toInteger(nullIf(row.sale_id, '')),
+    c.line_no = toInteger(nullIf(row.line_no, '')),
+    c.qty_sold = toInteger(nullIf(row.qty_sold, '')),
+    c.unit_price_charged = toFloat(nullIf(row.unit_price_charged, '')),
+    c.batch_id = toInteger(nullIf(row.batch_id, '')),
+    c.markdown_id = toInteger(nullIf(row.markdown_id, ''))
+CALL (c, row) {
+  MATCH (p:Sale {sale_id: toInteger(nullIf(row.sale_id, ''))})
+  CREATE (c)-[:SALE_LINE_SALE]->(p)
+}
+CALL (c, row) {
+  MATCH (p:StockBatch {batch_id: toInteger(nullIf(row.batch_id, ''))})
+  CREATE (c)-[:SALE_LINE_STOCK_BATCH]->(p)
+}
+CALL (c, row) {
+  MATCH (p:Markdown {markdown_id: toInteger(nullIf(row.markdown_id, ''))})
+  CREATE (c)-[:SALE_LINE_MARKDOWN]->(p)
+};
+
+// write_off
+LOAD CSV WITH HEADERS FROM 'file:///write_off.csv' AS row
+CREATE (c:WriteOff)
+SET c.writeoff_id = toInteger(nullIf(row.writeoff_id, '')),
+    c.writeoff_date = date(nullIf(row.writeoff_date, '')),
+    c.qty = toInteger(nullIf(row.qty, '')),
+    c.reason = nullIf(row.reason, ''),
+    c.batch_id = toInteger(nullIf(row.batch_id, '')),
+    c.employee_id = toInteger(nullIf(row.employee_id, ''))
+CALL (c, row) {
+  MATCH (p:StockBatch {batch_id: toInteger(nullIf(row.batch_id, ''))})
+  CREATE (c)-[:WRITE_OFF_STOCK_BATCH]->(p)
+}
+CALL (c, row) {
+  MATCH (p:DutyManager {employee_id: toInteger(nullIf(row.employee_id, ''))})
+  CREATE (c)-[:WRITE_OFF_DUTY_MANAGER]->(p)
+};
+
+// supply_agreement
+LOAD CSV WITH HEADERS FROM 'file:///supply_agreement.csv' AS row
+CREATE (c:SupplyAgreement)
+SET c.supplier_id = toInteger(nullIf(row.supplier_id, '')),
+    c.product_id = toInteger(nullIf(row.product_id, '')),
+    c.store_id = toInteger(nullIf(row.store_id, '')),
+    c.valid_from = date(nullIf(row.valid_from, '')),
+    c.agreed_unit_cost = toFloat(nullIf(row.agreed_unit_cost, '')),
+    c.lead_time_days = toInteger(nullIf(row.lead_time_days, '')),
+    c.min_order_qty = toInteger(nullIf(row.min_order_qty, '')),
+    c.valid_to = date(nullIf(row.valid_to, ''))
+CALL (c, row) {
+  MATCH (p:Supplier {supplier_id: toInteger(nullIf(row.supplier_id, ''))})
+  CREATE (c)-[:SUPPLY_AGREEMENT_SUPPLIER]->(p)
+}
+CALL (c, row) {
+  MATCH (p:Product {product_id: toInteger(nullIf(row.product_id, ''))})
+  CREATE (c)-[:SUPPLY_AGREEMENT_PRODUCT]->(p)
+}
+CALL (c, row) {
+  MATCH (p:Store {store_id: toInteger(nullIf(row.store_id, ''))})
+  CREATE (c)-[:SUPPLY_AGREEMENT_STORE]->(p)
+};
+
+// ---- PART 3  Verify: expected 16,786 nodes and 31,740 relationships ---------
+MATCH (n) WITH count(n) AS nodes
+MATCH ()-[r]->() RETURN nodes, count(r) AS relationships;
