@@ -6,8 +6,6 @@
 //  Plugins  : Graph Data Science 2026.09 (APOC is not required)
 //  Requires : the graph built by import.txt (12,727 nodes, 27,681 relationships)
 //
-//  Run the statements in order. The GDS projection lives in memory only. After
-//  a restart, run step 4.1 again before the steps that follow it.
 //  Screenshots of every result are in 05_screenshots/task4_centrality.
 // ============================================================================
 
