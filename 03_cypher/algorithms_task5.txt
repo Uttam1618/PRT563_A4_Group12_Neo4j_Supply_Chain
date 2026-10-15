@@ -1,0 +1,158 @@
+// ============================================================================
+//  PRT563 Advanced Data Management, Assessment 4, Group 12
+//  algorithms_task5.txt : Graph Data Science similarity use case (Task 5)
+//
+//  Target   : Neo4j 2026.09 (Neo4j Desktop), Cypher 25
+//  Plugins  : Graph Data Science 2026.09 (APOC is not required)
+//  Requires : the graph built by import.txt (12,727 nodes, 27,681 relationships)
+//
+//  Run the statements in order. The GDS projection lives in memory only. After
+//  a restart, run step 5.1 again before the steps that follow it.
+//  Screenshots of every result are in 05_screenshots/task5_similarity.
+// ============================================================================
+
+
+// ============================================================================
+//  TASK 5  SIMILARITY: WHAT DO CUSTOMERS BUY TOGETHER?
+//
+//  Use case : Seafood, beef and bread cause most stock loss (queries.txt Q4).
+//             Knowing each product's purchase partners supports shelf
+//             placement, waste reducing bundles and targeted promotions.
+//  Design   : 4 methods (Node Similarity with Jaccard, Overlap and Cosine,
+//             and FastRP embeddings with K Nearest Neighbours), trained on
+//             January to June baskets and tested on 556 unseen July and
+//             August baskets against a best seller baseline.
+// ============================================================================
+
+// ---- 5.1 Project the training baskets (1,546 nodes, 9,708 relationships) --
+// IN_BASKET (product -> sale) for Node Similarity, which compares nodes by
+// their outgoing links. IN_BASKET_BOTH (undirected) for FastRP.
+CALL () {
+  MATCH (s:Sale)-[:HAS_LINE]->(:SaleLine)-[:DRAWS_FROM]->(:StockBatch)-[:OF_PRODUCT]->(p:Product)
+  WHERE s.saleDatetime < localdatetime('2026-07-01T00:00')
+  WITH DISTINCT p, s
+  UNWIND ['IN_BASKET', 'IN_BASKET_BOTH'] AS type
+  RETURN p, s, type
+}
+WITH gds.graph.project('basketNet', p, s,
+       { sourceNodeLabels: ['Product'],
+         targetNodeLabels: ['Sale'],
+         relationshipType: type },
+       { undirectedRelationshipTypes: ['IN_BASKET_BOTH'] }) AS g
+RETURN g.graphName AS graph, g.nodeCount AS nodes, g.relationshipCount AS relationships;
+
+// ---- 5.2 Run the four similarity methods (top 3 partners each) ------------
+// A fixed randomSeed with concurrency 1 makes FastRP and KNN reproducible.
+CALL gds.nodeSimilarity.mutate('basketNet', {
+       relationshipTypes: ['IN_BASKET'], similarityMetric: 'JACCARD', topK: 3,
+       mutateRelationshipType: 'SIM_JACCARD', mutateProperty: 'score'})
+  YIELD nodesCompared AS n1, relationshipsWritten AS r1, computeMillis AS t1
+CALL gds.nodeSimilarity.mutate('basketNet', {
+       relationshipTypes: ['IN_BASKET'], similarityMetric: 'OVERLAP', topK: 3,
+       mutateRelationshipType: 'SIM_OVERLAP', mutateProperty: 'score'})
+  YIELD nodesCompared AS n2, relationshipsWritten AS r2, computeMillis AS t2
+CALL gds.nodeSimilarity.mutate('basketNet', {
+       relationshipTypes: ['IN_BASKET'], similarityMetric: 'COSINE', topK: 3,
+       mutateRelationshipType: 'SIM_COSINE', mutateProperty: 'score'})
+  YIELD nodesCompared AS n3, relationshipsWritten AS r3, computeMillis AS t3
+CALL gds.fastRP.mutate('basketNet', {
+       relationshipTypes: ['IN_BASKET_BOTH'], embeddingDimension: 32,
+       randomSeed: 42, concurrency: 1, mutateProperty: 'embedding'})
+  YIELD nodePropertiesWritten AS n4, computeMillis AS t4
+CALL gds.knn.mutate('basketNet', {
+       nodeLabels: ['Product'], nodeProperties: ['embedding'], topK: 3,
+       sampleRate: 1.0, deltaThreshold: 0.0, randomSeed: 42, concurrency: 1,
+       mutateRelationshipType: 'SIM_KNN', mutateProperty: 'score'})
+  YIELD nodesCompared AS n5, relationshipsWritten AS r5,
+        ranIterations AS i5, didConverge AS c5, computeMillis AS t5
+UNWIND [
+  {method: 'Node Similarity (Jaccard)', output: 'SIM_JACCARD', nodes: n1, written: r1, iterations: null, converged: null, ms: t1},
+  {method: 'Node Similarity (Overlap)', output: 'SIM_OVERLAP', nodes: n2, written: r2, iterations: null, converged: null, ms: t2},
+  {method: 'Node Similarity (Cosine)',  output: 'SIM_COSINE',  nodes: n3, written: r3, iterations: null, converged: null, ms: t3},
+  {method: 'FastRP embedding',          output: 'embedding',   nodes: n4, written: null, iterations: null, converged: null, ms: t4},
+  {method: 'KNN on embeddings',         output: 'SIM_KNN',     nodes: n5, written: r5, iterations: i5, converged: c5, ms: t5}
+] AS run
+RETURN run.method AS method, run.output AS output, run.nodes AS nodes,
+       run.written AS relationshipsWritten, run.iterations AS iterations,
+       run.converged AS converged, run.ms AS computeMillis;
+
+// ---- 5.3 Top 3 partners of the high loss products, by method ---------------
+CALL gds.graph.relationshipProperty.stream('basketNet', 'score',
+       ['SIM_JACCARD', 'SIM_OVERLAP', 'SIM_COSINE', 'SIM_KNN'])
+YIELD sourceNodeId, targetNodeId, relationshipType, propertyValue
+WITH gds.util.asNode(sourceNodeId).productName AS product,
+     relationshipType AS method,
+     gds.util.asNode(targetNodeId).productName AS partner,
+     propertyValue AS score
+WHERE product IN ['Baby Spinach', 'Barramundi Fillets', 'Beef Mince Premium',
+                  'Green Prawns', 'White Sandwich Loaf']
+ORDER BY product, method, score DESC, partner
+WITH product, method,
+     collect(partner + ' (' + toString(round(score, 3)) + ')') AS top3
+WITH product, collect([method, top3]) AS lists
+WITH product, {x IN lists | x[0]: x[1]} AS m
+RETURN product,
+       m.SIM_JACCARD AS jaccard,
+       m.SIM_OVERLAP AS overlap,
+       m.SIM_COSINE  AS cosine,
+       m.SIM_KNN     AS knnFastRP
+ORDER BY product;
+
+// ---- 5.4 Hold out evaluation on July and August baskets --------------------
+// testLift       : how many times more often the recommended pair was bought
+//                  together than chance (1 means no link)
+// testConfidence : share of baskets with product A that also had partner B
+// precisionAt3   : share of recommendations among A's real top 3 partners
+// Result: Jaccard and Cosine 3.095 / 0.329 / 0.717, KNN 3.095 / 0.307 / 0.7,
+// Overlap 2.891 / 0.313 / 0.7, best seller baseline 0.724 / 0.145 / 0.167.
+MATCH (s:Sale) WHERE s.saleDatetime >= localdatetime('2026-07-01T00:00')
+WITH count(s) AS n
+CALL () {
+  MATCH (p:Product)<-[:OF_PRODUCT]-(:StockBatch)<-[:DRAWS_FROM]-(:SaleLine)<-[:HAS_LINE]-(s:Sale)
+  WHERE s.saleDatetime >= localdatetime('2026-07-01T00:00')
+  RETURN p.productName AS name, collect(DISTINCT s.saleId) AS baskets
+}
+WITH n, collect([name, baskets]) AS pairs
+WITH n, {x IN pairs | x[0]: x[1]} AS T
+CALL (n, T) {
+  UNWIND keys(T) AS a
+  UNWIND [k IN keys(T) WHERE k <> a] AS b
+  WITH a, b, size([x IN T[a] WHERE x IN T[b]]) * n * 1.0 / (size(T[a]) * size(T[b])) AS lift
+  ORDER BY a, lift DESC, b
+  WITH a, collect(b)[0..3] AS best
+  RETURN collect([a, best]) AS truthPairs
+}
+WITH n, T, {x IN truthPairs | x[0]: x[1]} AS truth
+CALL () {
+  CALL gds.graph.relationshipProperty.stream('basketNet', 'score',
+         ['SIM_JACCARD', 'SIM_OVERLAP', 'SIM_COSINE', 'SIM_KNN'])
+  YIELD sourceNodeId, targetNodeId, relationshipType
+  RETURN relationshipType AS method,
+         gds.util.asNode(sourceNodeId).productName AS a,
+         gds.util.asNode(targetNodeId).productName AS b
+  UNION
+  MATCH (p:Product)<-[:OF_PRODUCT]-(:StockBatch)<-[:DRAWS_FROM]-(:SaleLine)<-[:HAS_LINE]-(s:Sale)
+  WHERE s.saleDatetime < localdatetime('2026-07-01T00:00')
+  WITH p.productName AS name, count(DISTINCT s) AS sold
+  ORDER BY sold DESC, name
+  WITH collect(name) AS ranked
+  UNWIND ranked AS a
+  UNWIND [x IN ranked WHERE x <> a][0..3] AS b
+  RETURN 'BEST_SELLERS' AS method, a, b
+}
+WITH method, a, b, n, T, truth, size([x IN T[a] WHERE x IN T[b]]) AS both
+WITH method,
+     avg(both * n * 1.0 / (size(T[a]) * size(T[b])))   AS testLift,
+     avg(both * 1.0 / size(T[a]))                       AS testConfidence,
+     avg(CASE WHEN b IN truth[a] THEN 1.0 ELSE 0.0 END) AS precisionAt3
+RETURN method,
+       round(testLift, 3)       AS testLift,
+       round(testConfidence, 3) AS testConfidence,
+       round(precisionAt3, 3)   AS precisionAt3
+ORDER BY testLift DESC, method;
+
+
+// ============================================================================
+//  CLEAN UP: release the in memory projection
+// ============================================================================
+CALL gds.graph.drop('basketNet');
