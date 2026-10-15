@@ -1,0 +1,485 @@
+// ============================================================================
+//  PRT563 Advanced Data Management, Assessment 4, Group 12
+//  import.txt : migrate the Assessment 2 relational database into Neo4j
+//
+//  Target   : Neo4j 2026.09 (Neo4j Desktop), Cypher 25
+//  Source   : 29 CSV files, 16,786 rows. Master data as exported from
+//             PRT563_A2_Group12.sql; transaction tables regenerated so that
+//             every row passes the 24 business rules in audit.py
+//  Result   : 12,727 nodes, 27,681 relationships, 18 node types (23 labels),
+//             26 relationship types  (Model B, the optimised graph model)
+//
+//  BEFORE RUNNING
+//    Copy all 29 .csv files into the instance's import folder:
+//    Neo4j Desktop > instance [...] > Open > Instance folder > import
+//
+//  HOW TO RUN
+//    Run the five parts in order. Every statement uses MERGE on a
+//    constrained key, so the whole script can be run again safely without
+//    creating duplicates.
+//
+//    PART 1  Constraints          (one per node type, 18)
+//    PART 2  Indexes              (search indexes for the use case queries)
+//    PART 3  Nodes                (12,727 nodes, plus extra labels and lists)
+//    PART 4  Relationships        (27,681 relationships)
+//    PART 5  Clean up and verify
+// ============================================================================
+
+// To start completely fresh, uncomment and run this line first:
+// MATCH (n) DETACH DELETE n;
+
+
+// ============================================================================
+//  PART 1  CONSTRAINTS
+//  A uniqueness constraint on each node key. It stops duplicate nodes, and
+//  each one creates an index that makes every MERGE and MATCH on that key a
+//  direct lookup instead of a scan of every node with the label.
+//  Weak and associative entities get a single surrogate key (bayId,
+//  saleLineId, agreementId) built from their relational composite key.
+// ============================================================================
+
+CREATE CONSTRAINT store_id IF NOT EXISTS FOR (n:Store) REQUIRE n.storeId IS UNIQUE;
+CREATE CONSTRAINT shelfbay_id IF NOT EXISTS FOR (n:ShelfBay) REQUIRE n.bayId IS UNIQUE;
+CREATE CONSTRAINT category_id IF NOT EXISTS FOR (n:ProductCategory) REQUIRE n.categoryId IS UNIQUE;
+CREATE CONSTRAINT product_id IF NOT EXISTS FOR (n:Product) REQUIRE n.productId IS UNIQUE;
+CREATE CONSTRAINT supplier_id IF NOT EXISTS FOR (n:Supplier) REQUIRE n.supplierId IS UNIQUE;
+CREATE CONSTRAINT dc_id IF NOT EXISTS FOR (n:DistributionCentre) REQUIRE n.dcId IS UNIQUE;
+CREATE CONSTRAINT employee_id IF NOT EXISTS FOR (n:Employee) REQUIRE n.employeeId IS UNIQUE;
+CREATE CONSTRAINT po_id IF NOT EXISTS FOR (n:PurchaseOrder) REQUIRE n.poId IS UNIQUE;
+CREATE CONSTRAINT delivery_id IF NOT EXISTS FOR (n:Delivery) REQUIRE n.deliveryId IS UNIQUE;
+CREATE CONSTRAINT invoice_id IF NOT EXISTS FOR (n:Invoice) REQUIRE n.invoiceId IS UNIQUE;
+CREATE CONSTRAINT disruption_id IF NOT EXISTS FOR (n:SupplyDisruption) REQUIRE n.disruptionId IS UNIQUE;
+CREATE CONSTRAINT batch_id IF NOT EXISTS FOR (n:StockBatch) REQUIRE n.batchId IS UNIQUE;
+CREATE CONSTRAINT count_id IF NOT EXISTS FOR (n:StockCount) REQUIRE n.countId IS UNIQUE;
+CREATE CONSTRAINT sale_id IF NOT EXISTS FOR (n:Sale) REQUIRE n.saleId IS UNIQUE;
+CREATE CONSTRAINT saleline_id IF NOT EXISTS FOR (n:SaleLine) REQUIRE n.saleLineId IS UNIQUE;
+CREATE CONSTRAINT markdown_id IF NOT EXISTS FOR (n:Markdown) REQUIRE n.markdownId IS UNIQUE;
+CREATE CONSTRAINT writeoff_id IF NOT EXISTS FOR (n:WriteOff) REQUIRE n.writeoffId IS UNIQUE;
+CREATE CONSTRAINT agreement_id IF NOT EXISTS FOR (n:SupplyAgreement) REQUIRE n.agreementId IS UNIQUE;
+
+
+// ============================================================================
+//  PART 2  INDEXES
+//  The constraints above already index every key. These add indexes on the
+//  properties the business actually searches and filters by.
+// ============================================================================
+
+// Range indexes: date and time filters (expiry windows, sales periods)
+CREATE INDEX batch_use_by IF NOT EXISTS FOR (n:StockBatch) ON (n.useByDate);
+CREATE INDEX sale_datetime IF NOT EXISTS FOR (n:Sale) ON (n.saleDatetime);
+CREATE INDEX delivery_date IF NOT EXISTS FOR (n:Delivery) ON (n.deliveryDate);
+CREATE INDEX markdown_applied IF NOT EXISTS FOR (n:Markdown) ON (n.appliedAt);
+
+// Temporary range index used only during the import to resolve the old
+// CONSIGNOR key; dropped again in PART 5
+CREATE INDEX tmp_supplier_consignor IF NOT EXISTS FOR (n:Supplier) ON (n.consignorId);
+CREATE INDEX tmp_dc_consignor IF NOT EXISTS FOR (n:DistributionCentre) ON (n.consignorId);
+
+// Text index: fast CONTAINS / ENDS WITH searches on product names
+CREATE TEXT INDEX product_name_text IF NOT EXISTS FOR (n:Product) ON (n.productName);
+
+// Relationship property index: delivery quality checks on rejected stock
+CREATE INDEX delivered_rejected IF NOT EXISTS FOR ()-[r:DELIVERED]-() ON (r.rejectedQty);
+
+// Full text index: one search box across products and suppliers
+CREATE FULLTEXT INDEX catalogue_search IF NOT EXISTS
+FOR (n:Product|Supplier) ON EACH [n.productName, n.supplierName];
+
+
+// ============================================================================
+//  PART 3  NODES
+//  nullIf(x, '') turns an empty CSV field into a real null, so optional
+//  values such as an ambient product's use by date are simply not stored.
+// ============================================================================
+
+// ---- 3.1 Store (4) --------------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///store.csv' AS row
+MERGE (s:Store {storeId: toInteger(row.store_id)})
+SET s.storeName         = row.store_name,
+    s.street            = row.street,
+    s.suburb            = row.suburb,
+    s.postcode          = row.postcode,          // kept as text: 0800 not 800
+    s.region            = row.region,
+    s.openedDate        = date(row.opened_date),
+    s.lastFullStocktake = date(nullIf(row.last_full_stocktake, ''));
+
+// ---- 3.2 ShelfBay (16), weak entity, key = store + bay code ---------------
+LOAD CSV WITH HEADERS FROM 'file:///shelf_bay.csv' AS row
+MERGE (b:ShelfBay {bayId: row.store_id + ':' + row.bay_code})
+SET b.bayCode         = row.bay_code,
+    b.aisleCode       = row.aisle_code,
+    b.capacityFacings = toInteger(row.capacity_facings),
+    b.tempZone        = row.temp_zone;
+
+// ---- 3.3 ProductCategory (6) ----------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///product_category.csv' AS row
+MERGE (c:ProductCategory {categoryId: toInteger(row.category_id)})
+SET c.categoryName = row.category_name,
+    c.department   = row.department;
+
+// ---- 3.4 Product (20) -----------------------------------------------------
+// product_type is not stored: the :Perishable / :Ambient labels below
+// replace it (optimisation O1)
+LOAD CSV WITH HEADERS FROM 'file:///product.csv' AS row
+MERGE (p:Product {productId: toInteger(row.product_id)})
+SET p.barcode            = row.barcode,
+    p.productName        = row.product_name,
+    p.unitOfMeasure      = row.unit_of_measure,
+    p.packSize           = row.pack_size,
+    p.currentRetailPrice = toFloat(row.current_retail_price);
+
+// O1: subclass table becomes an extra label on the same node
+LOAD CSV WITH HEADERS FROM 'file:///perishable_product.csv' AS row
+MATCH (p:Product {productId: toInteger(row.product_id)})
+SET p:Perishable,
+    p.shelfLifeDays       = toInteger(row.shelf_life_days),
+    p.storageTempC        = toFloat(row.storage_temp_c),
+    p.markdownTriggerDays = toInteger(row.markdown_trigger_days);
+
+LOAD CSV WITH HEADERS FROM 'file:///ambient_product.csv' AS row
+MATCH (p:Product {productId: toInteger(row.product_id)})
+SET p:Ambient,
+    p.minStockCoverDays = toInteger(row.min_stock_cover_days);
+
+// ---- 3.5 Supplier (8) and DistributionCentre (3) --------------------------
+// consignorId is a temporary property, used only to build CONSIGNED_BY in
+// PART 4, then removed in PART 5 (optimisation O2)
+LOAD CSV WITH HEADERS FROM 'file:///supplier.csv' AS row
+MERGE (s:Supplier {supplierId: toInteger(row.supplier_id)})
+SET s.supplierName = row.supplier_name,
+    s.abnNumber    = row.abn_number,
+    s.contactEmail = row.contact_email,
+    s.isLocalNt    = (row.is_local_nt = '1'),
+    s.consignorId  = toInteger(nullIf(row.consignor_id, ''));
+
+LOAD CSV WITH HEADERS FROM 'file:///distribution_centre.csv' AS row
+MERGE (d:DistributionCentre {dcId: toInteger(row.dc_id)})
+SET d.dcName      = row.dc_name,
+    d.city        = row.city,
+    d.state       = row.state,
+    d.consignorId = toInteger(nullIf(row.consignor_id, ''));
+
+// O2: the CONSIGNOR table disappears, but its one attribute must not be
+// lost, so it moves onto whichever supplier or DC it belonged to
+LOAD CSV WITH HEADERS FROM 'file:///consignor.csv' AS row
+MATCH (c:Supplier|DistributionCentre {consignorId: toInteger(row.consignor_id)})
+SET c.defaultLeadTimeDays = toInteger(row.default_lead_time_days);
+
+// ---- 3.6 Employee (12) ----------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///employee.csv' AS row
+MERGE (e:Employee {employeeId: toInteger(row.employee_id)})
+SET e.firstName   = row.first_name,
+    e.lastName    = row.last_name,
+    e.dateOfBirth = date(row.date_of_birth),
+    e.hireDate    = date(row.hire_date);
+
+// O3: the multi valued attribute becomes one list property
+LOAD CSV WITH HEADERS FROM 'file:///employee_phone.csv' AS row
+WITH toInteger(row.employee_id) AS id, collect(row.phone) AS phones
+MATCH (e:Employee {employeeId: id})
+SET e.phones = phones;
+
+// O1: overlapping specialisation becomes role labels; one employee
+// can hold two roles, and three hold none
+LOAD CSV WITH HEADERS FROM 'file:///ordering_officer.csv' AS row
+MATCH (e:Employee {employeeId: toInteger(row.employee_id)})
+SET e:OrderingOfficer, e.orderingLimitAud = toFloat(row.ordering_limit_aud);
+
+LOAD CSV WITH HEADERS FROM 'file:///replenishment_assistant.csv' AS row
+MATCH (e:Employee {employeeId: toInteger(row.employee_id)})
+SET e:ReplenishmentAssistant, e.assignedAisle = row.assigned_aisle;
+
+LOAD CSV WITH HEADERS FROM 'file:///duty_manager.csv' AS row
+MATCH (e:Employee {employeeId: toInteger(row.employee_id)})
+SET e:DutyManager, e.approvalLimitAud = toFloat(row.approval_limit_aud);
+
+// ---- 3.7 PurchaseOrder (977) ----------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///purchase_order.csv' AS row
+MERGE (o:PurchaseOrder {poId: toInteger(row.po_id)})
+SET o.orderDate    = date(row.order_date),
+    o.requiredDate = date(nullIf(row.required_date, '')),
+    o.poStatus     = row.po_status;
+
+// ---- 3.8 Delivery (977) ---------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///delivery.csv' AS row
+MERGE (d:Delivery {deliveryId: toInteger(row.delivery_id)})
+SET d.deliveryDate     = date(row.delivery_date),
+    d.consignmentNote  = row.consignment_note,
+    d.tempOnArrivalC   = toFloat(nullIf(row.temp_on_arrival_c, ''));
+
+// ---- 3.9 Invoice (948) ----------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///invoice.csv' AS row
+MERGE (i:Invoice {invoiceId: toInteger(row.invoice_id)})
+SET i.invoiceDate = date(row.invoice_date),
+    i.amountExGst = toFloat(row.amount_ex_gst),
+    i.gstAmount   = toFloat(row.gst_amount),
+    i.dueDate     = date(row.due_date);
+
+// ---- 3.10 SupplyDisruption (3) --------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///supply_disruption.csv' AS row
+MERGE (x:SupplyDisruption {disruptionId: toInteger(row.disruption_id)})
+SET x.startDate = date(row.start_date),
+    x.endDate   = date(nullIf(row.end_date, '')),
+    x.cause     = row.cause,
+    x.severity  = row.severity;
+
+// ---- 3.11 StockBatch (1,805) ----------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///stock_batch.csv' AS row
+MERGE (b:StockBatch {batchId: toInteger(row.batch_id)})
+SET b.receivedDate = date(row.received_date),
+    b.useByDate    = date(nullIf(row.use_by_date, '')),   // null for ambient stock
+    b.qtyReceived  = toInteger(row.qty_received),
+    b.qtyOnHand    = toInteger(row.qty_on_hand),
+    b.costPrice    = toFloat(row.cost_price);
+
+// ---- 3.12 StockCount (36) -------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///stock_count.csv' AS row
+MERGE (k:StockCount {countId: toInteger(row.count_id)})
+SET k.countDate = date(row.count_date),
+    k.countType = row.count_type;
+
+// ---- 3.13 Sale (2,082) ----------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///sale.csv' AS row
+MERGE (s:Sale {saleId: toInteger(row.sale_id)})
+SET s.saleDatetime  = localdatetime(replace(row.sale_datetime, ' ', 'T')),
+    s.paymentMethod = row.payment_method,
+    s.registerNo    = toInteger(row.register_no);
+
+// ---- 3.14 SaleLine (4,504), weak entity, key = sale + line number ---------
+LOAD CSV WITH HEADERS FROM 'file:///sale_line.csv' AS row
+MERGE (l:SaleLine {saleLineId: row.sale_id + ':' + row.line_no})
+SET l.lineNo           = toInteger(row.line_no),
+    l.qtySold          = toInteger(row.qty_sold),
+    l.unitPriceCharged = toFloat(row.unit_price_charged);
+
+// ---- 3.15 Markdown (704) --------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///markdown.csv' AS row
+MERGE (m:Markdown {markdownId: toInteger(row.markdown_id)})
+SET m.appliedAt     = localdatetime(replace(row.applied_at, ' ', 'T')),
+    m.originalPrice = toFloat(row.original_price),
+    m.reducedPrice  = toFloat(row.reduced_price),
+    m.reason        = row.reason;
+
+// ---- 3.16 WriteOff (514) --------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///write_off.csv' AS row
+MERGE (w:WriteOff {writeoffId: toInteger(row.writeoff_id)})
+SET w.writeoffDate = date(row.writeoff_date),
+    w.qty          = toInteger(row.qty),
+    w.reason       = row.reason;
+
+// ---- 3.17 SupplyAgreement (108), ternary, stays a node --------------------
+LOAD CSV WITH HEADERS FROM 'file:///supply_agreement.csv' AS row
+MERGE (a:SupplyAgreement {agreementId: row.supplier_id + ':' + row.product_id + ':' + row.store_id + ':' + row.valid_from})
+SET a.validFrom      = date(row.valid_from),
+    a.validTo        = date(nullIf(row.valid_to, '')),
+    a.agreedUnitCost = toFloat(row.agreed_unit_cost),
+    a.leadTimeDays   = toInteger(row.lead_time_days),
+    a.minOrderQty    = toInteger(row.min_order_qty);
+
+
+// ============================================================================
+//  PART 4  RELATIONSHIPS
+//  Both ends are found through their constraint index, then joined with
+//  MERGE, so a re-run never creates a second copy of a relationship.
+// ============================================================================
+
+// ---- Catalogue and store --------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///product.csv' AS row
+MATCH (p:Product {productId: toInteger(row.product_id)})
+MATCH (c:ProductCategory {categoryId: toInteger(row.category_id)})
+MERGE (p)-[:BELONGS_TO]->(c);
+
+LOAD CSV WITH HEADERS FROM 'file:///shelf_bay.csv' AS row
+MATCH (b:ShelfBay {bayId: row.store_id + ':' + row.bay_code})
+MATCH (s:Store {storeId: toInteger(row.store_id)})
+MERGE (b)-[:LOCATED_IN]->(s);
+
+// ---- Ordering -------------------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///purchase_order.csv' AS row
+MATCH (o:PurchaseOrder {poId: toInteger(row.po_id)})
+MATCH (sup:Supplier {supplierId: toInteger(row.supplier_id)})
+MATCH (st:Store {storeId: toInteger(row.store_id)})
+MATCH (e:Employee:OrderingOfficer {employeeId: toInteger(row.employee_id)})
+MERGE (o)-[:PLACED_WITH]->(sup)
+MERGE (o)-[:FOR_STORE]->(st)
+MERGE (o)-[:RAISED_BY]->(e);
+
+// O5: the PO_LINE table becomes a relationship carrying the line data
+LOAD CSV WITH HEADERS FROM 'file:///po_line.csv' AS row
+MATCH (o:PurchaseOrder {poId: toInteger(row.po_id)})
+MATCH (p:Product {productId: toInteger(row.product_id)})
+MERGE (o)-[r:ORDERS {lineNo: toInteger(row.line_no)}]->(p)
+SET r.orderedQty     = toInteger(row.ordered_qty),
+    r.agreedUnitCost = toFloat(row.agreed_unit_cost);
+
+// ---- Receiving ------------------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///delivery.csv' AS row
+WITH row WHERE nullIf(row.po_id, '') IS NOT NULL
+MATCH (d:Delivery {deliveryId: toInteger(row.delivery_id)})
+MATCH (o:PurchaseOrder {poId: toInteger(row.po_id)})
+MERGE (d)-[:FULFILS]->(o);
+
+// O2: point straight at the supplier or DC that sent it; the label
+// expression Supplier|DistributionCentre matches whichever one exists
+LOAD CSV WITH HEADERS FROM 'file:///delivery.csv' AS row
+WITH row WHERE nullIf(row.consignor_id, '') IS NOT NULL
+MATCH (d:Delivery {deliveryId: toInteger(row.delivery_id)})
+MATCH (c:Supplier|DistributionCentre {consignorId: toInteger(row.consignor_id)})
+MERGE (d)-[:CONSIGNED_BY]->(c);
+
+LOAD CSV WITH HEADERS FROM 'file:///invoice.csv' AS row
+MATCH (i:Invoice {invoiceId: toInteger(row.invoice_id)})
+MATCH (d:Delivery {deliveryId: toInteger(row.delivery_id)})
+MERGE (i)-[:BILLS]->(d);
+
+// O4: associative table becomes a relationship with a property
+LOAD CSV WITH HEADERS FROM 'file:///disruption_impact.csv' AS row
+MATCH (x:SupplyDisruption {disruptionId: toInteger(row.disruption_id)})
+MATCH (d:Delivery {deliveryId: toInteger(row.delivery_id)})
+MERGE (x)-[r:AFFECTS]->(d)
+SET r.delayDays = toInteger(row.delay_days);
+
+// O6: DELIVERY_LINE is 1:1 with STOCK_BATCH, so it collapses into one
+// relationship. Step 1 creates it from the batch's line reference ...
+LOAD CSV WITH HEADERS FROM 'file:///stock_batch.csv' AS row
+MATCH (d:Delivery {deliveryId: toInteger(row.delivery_id)})
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MERGE (d)-[r:DELIVERED {lineNo: toInteger(row.line_no)}]->(b);
+
+// ... step 2 copies the delivery line's quantities onto it
+LOAD CSV WITH HEADERS FROM 'file:///delivery_line.csv' AS row
+MATCH (:Delivery {deliveryId: toInteger(row.delivery_id)})-[r:DELIVERED {lineNo: toInteger(row.line_no)}]->(:StockBatch)
+SET r.deliveredQty = toInteger(row.delivered_qty),
+    r.rejectedQty  = toInteger(row.rejected_qty);
+
+// ---- Stock ----------------------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///stock_batch.csv' AS row
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MATCH (p:Product {productId: toInteger(row.product_id)})
+MERGE (b)-[:OF_PRODUCT]->(p);
+
+LOAD CSV WITH HEADERS FROM 'file:///stock_batch.csv' AS row
+WITH row WHERE nullIf(row.bay_code, '') IS NOT NULL
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MATCH (sb:ShelfBay {bayId: row.store_id + ':' + row.bay_code})
+MERGE (b)-[:STORED_IN]->(sb);
+
+// O4: associative table becomes a relationship with properties
+LOAD CSV WITH HEADERS FROM 'file:///batch_count.csv' AS row
+MATCH (k:StockCount {countId: toInteger(row.count_id)})
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MERGE (k)-[r:COUNTED]->(b)
+SET r.countedQty = toInteger(row.counted_qty),
+    r.systemQty  = toInteger(row.system_qty);
+
+LOAD CSV WITH HEADERS FROM 'file:///stock_count.csv' AS row
+MATCH (k:StockCount {countId: toInteger(row.count_id)})
+MATCH (e:Employee {employeeId: toInteger(row.employee_id)})
+MERGE (k)-[:PERFORMED_BY]->(e);
+
+// ---- Sales ----------------------------------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///sale.csv' AS row
+MATCH (s:Sale {saleId: toInteger(row.sale_id)})
+MATCH (st:Store {storeId: toInteger(row.store_id)})
+MERGE (s)-[:OCCURS_AT]->(st);
+
+LOAD CSV WITH HEADERS FROM 'file:///sale_line.csv' AS row
+MATCH (s:Sale {saleId: toInteger(row.sale_id)})
+MATCH (l:SaleLine {saleLineId: row.sale_id + ':' + row.line_no})
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MERGE (s)-[:HAS_LINE]->(l)
+MERGE (l)-[:DRAWS_FROM]->(b);
+
+LOAD CSV WITH HEADERS FROM 'file:///sale_line.csv' AS row
+WITH row WHERE nullIf(row.markdown_id, '') IS NOT NULL
+MATCH (m:Markdown {markdownId: toInteger(row.markdown_id)})
+MATCH (l:SaleLine {saleLineId: row.sale_id + ':' + row.line_no})
+MERGE (m)-[:APPLIED_TO]->(l);
+
+LOAD CSV WITH HEADERS FROM 'file:///markdown.csv' AS row
+MATCH (m:Markdown {markdownId: toInteger(row.markdown_id)})
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MATCH (e:Employee {employeeId: toInteger(row.employee_id)})
+MERGE (m)-[:MARKS_DOWN]->(b)
+MERGE (m)-[:MARKED_BY]->(e);
+
+LOAD CSV WITH HEADERS FROM 'file:///write_off.csv' AS row
+MATCH (w:WriteOff {writeoffId: toInteger(row.writeoff_id)})
+MATCH (b:StockBatch {batchId: toInteger(row.batch_id)})
+MATCH (e:Employee:DutyManager {employeeId: toInteger(row.employee_id)})
+MERGE (w)-[:WRITES_OFF]->(b)
+MERGE (w)-[:AUTHORISED_BY]->(e);
+
+// ---- Supply agreement (the ternary) ---------------------------------------
+LOAD CSV WITH HEADERS FROM 'file:///supply_agreement.csv' AS row
+MATCH (a:SupplyAgreement {agreementId: row.supplier_id + ':' + row.product_id + ':' + row.store_id + ':' + row.valid_from})
+MATCH (sup:Supplier {supplierId: toInteger(row.supplier_id)})
+MATCH (p:Product {productId: toInteger(row.product_id)})
+MATCH (st:Store {storeId: toInteger(row.store_id)})
+MERGE (sup)-[:OFFERS]->(a)
+MERGE (a)-[:COVERS]->(p)
+MERGE (a)-[:SUPPLIES_TO]->(st);
+
+
+// ============================================================================
+//  PART 5  CLEAN UP AND VERIFY
+// ============================================================================
+
+// Remove the temporary CONSIGNOR key and its indexes (O2 is now complete)
+MATCH (c:Supplier|DistributionCentre) REMOVE c.consignorId;
+DROP INDEX tmp_supplier_consignor IF EXISTS;
+DROP INDEX tmp_dc_consignor IF EXISTS;
+
+// Check 1: nodes per label. Expected: Store 4, ShelfBay 16,
+// ProductCategory 6, Product 20 (Perishable 12, Ambient 8), Supplier 8,
+// DistributionCentre 3, Employee 12 (OrderingOfficer 3,
+// ReplenishmentAssistant 4, DutyManager 3), PurchaseOrder 977,
+// Delivery 977, Invoice 948, SupplyDisruption 3, StockBatch 1805,
+// StockCount 36, Sale 2082, SaleLine 4504, Markdown 704, WriteOff 514,
+// SupplyAgreement 108
+CALL db.labels() YIELD label
+CALL (label) { MATCH (n) WHERE label IN labels(n) RETURN count(n) AS nodes }
+RETURN label, nodes ORDER BY label;
+
+// Check 2: relationships per type (26 types, 27,681 in total)
+CALL db.relationshipTypes() YIELD relationshipType AS type
+CALL (type) { MATCH ()-[r]->() WHERE type(r) = type RETURN count(r) AS rels }
+RETURN type, rels ORDER BY type;
+
+// Check 3: grand totals. Expected: 12,727 nodes, 27,681 relationships
+MATCH (n) WITH count(n) AS nodes
+MATCH ()-[r]->() RETURN nodes, count(r) AS relationships;
+
+// Check 4: integrity rules carried over from the relational design.
+// Every value returned should be 0.
+RETURN
+  COUNT { MATCH (p:Product) WHERE NOT (p:Perishable XOR p:Ambient) }               AS productsNotInExactlyOneSubclass,
+  COUNT { MATCH (d:Delivery) WHERE COUNT { (d)-[:CONSIGNED_BY]->() } <> 1 }       AS deliveriesWithoutOneConsignor,
+  COUNT { MATCH (b:StockBatch) WHERE COUNT { (b)<-[:DELIVERED]-() } <> 1 }        AS batchesNotFromExactlyOneDelivery,
+  COUNT { MATCH (b:StockBatch) WHERE b.qtyOnHand > b.qtyReceived }                AS batchesHoldingMoreThanReceived,
+  COUNT { MATCH (n) WHERE n.consignorId IS NOT NULL }                             AS leftoverTemporaryKeys;
+
+// Check 4b: the stock and sales rules from the data audit (audit.py), now
+// proved inside the graph. Every value returned should be 0.
+MATCH (b:StockBatch)
+CALL (b) {
+  OPTIONAL MATCH (b)<-[:DRAWS_FROM]-(l:SaleLine)
+  RETURN sum(l.qtySold) AS sold
+}
+CALL (b) {
+  OPTIONAL MATCH (b)<-[:WRITES_OFF]-(w:WriteOff)
+  RETURN sum(w.qty) AS writtenOff
+}
+WITH count(CASE WHEN b.qtyReceived - sold - writtenOff <> b.qtyOnHand THEN 1 END) AS batchesNotReconciled
+RETURN batchesNotReconciled,
+  COUNT { MATCH (s:Sale)-[:HAS_LINE]->(:SaleLine)-[:DRAWS_FROM]->(x:StockBatch)
+          WHERE date(s.saleDatetime) < x.receivedDate
+             OR date(s.saleDatetime) > x.useByDate }                     AS salesOutsideShelfLife,
+  COUNT { MATCH (s:Sale)-[:OCCURS_AT]->(st:Store),
+                (s)-[:HAS_LINE]->(:SaleLine)-[:DRAWS_FROM]->(:StockBatch)
+                   -[:STORED_IN]->(:ShelfBay)-[:LOCATED_IN]->(other:Store)
+          WHERE other <> st }                                            AS salesAtAnotherStore;
+
+// Check 5: list every constraint and index that now exists
+SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties
+RETURN name, type, entityType, labelsOrTypes, properties ORDER BY type, name;
