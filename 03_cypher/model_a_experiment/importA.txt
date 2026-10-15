@@ -7,12 +7,6 @@
 //  every column a property (foreign key columns kept), one relationship type
 //  per foreign key (38), named CHILDTABLE_PARENTTABLE, pointing child to parent.
 //  Result   : 16,786 nodes, 31,740 relationships
-//
-//  Run in a SEPARATE database so that Model B (database neo4j) is untouched:
-//    1. Choose the 'system' database in the Database menu and run
-//         CREATE DATABASE modela IF NOT EXISTS
-//    2. Choose 'modela' in the Database menu, then run this file.
-//  It reads the same 29 CSV files from the instance import folder.
 // ============================================================================
 
 // ---- PART 1  Constraints and indexes on every table key ---------------------
