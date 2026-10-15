@@ -159,23 +159,3 @@ turning this table from a design argument into a measured result.
 
 ---
 
-## 7. Trade offs to discuss in the report
-
-These keep the work honest, and the Translation HD band asks for "in depth
-understanding", not just optimisation.
-
-1. **Relationship properties are harder to query than node properties.** Line
-   level data such as `orderedQty` now lives on `ORDERS`. Neo4j supports
-   relationship property indexes, so this is manageable, but it is a cost.
-2. **Line identity is reduced to a property.** A delivery line no longer has
-   its own node, so nothing can ever point at a delivery line again. Safe now,
-   because nothing does; a future requirement could force it back.
-3. **Role labels allow inconsistency the SQL schema prevented.** SQL forced
-   `approval_limit_aud` to exist only for duty managers. In the graph, a node
-   could carry the property without the label. A property existence constraint
-   can enforce it (available in Neo4j Enterprise, which Desktop includes).
-4. **Hyperedges stay nodes.** `SupplyAgreement` and `SaleLine` are the graph
-   equivalent of n ary relationships and cannot be simplified further.
-5. **Fewer nodes changes the algorithms.** Centrality and similarity scores
-   depend on the shape of the graph, so the model choice directly affects the
-   Task 4 and 5 results. Worth one sentence in the discussion.
