@@ -6,8 +6,6 @@
 //  Plugins  : Graph Data Science 2026.09 (APOC is not required)
 //  Requires : the graph built by import.txt (12,727 nodes, 27,681 relationships)
 //
-//  Run the statements in order. The GDS projection lives in memory only. After
-//  a restart, run step 5.1 again before the steps that follow it.
 //  Screenshots of every result are in 05_screenshots/task5_similarity.
 // ============================================================================
 
@@ -41,7 +39,7 @@ WITH gds.graph.project('basketNet', p, s,
        { undirectedRelationshipTypes: ['IN_BASKET_BOTH'] }) AS g
 RETURN g.graphName AS graph, g.nodeCount AS nodes, g.relationshipCount AS relationships;
 
-// ---- 5.2 Run the four similarity methods (top 3 partners each) ------------
+// ---- 5.2 Running the four similarity methods (top 3 partners each) ------------
 // A fixed randomSeed with concurrency 1 makes FastRP and KNN reproducible.
 CALL gds.nodeSimilarity.mutate('basketNet', {
        relationshipTypes: ['IN_BASKET'], similarityMetric: 'JACCARD', topK: 3,
