@@ -1,0 +1,191 @@
+// ============================================================================
+//  PRT563 Advanced Data Management, Assessment 4, Group 12
+//  algorithms_task4.txt : Graph Data Science centrality use case (Task 4)
+//
+//  Target   : Neo4j 2026.09 (Neo4j Desktop), Cypher 25
+//  Plugins  : Graph Data Science 2026.09 (APOC is not required)
+//  Requires : the graph built by import.txt (12,727 nodes, 27,681 relationships)
+//
+//  Run the statements in order. The GDS projection lives in memory only. After
+//  a restart, run step 4.1 again before the steps that follow it.
+//  Screenshots of every result are in 05_screenshots/task4_centrality.
+// ============================================================================
+
+
+// ============================================================================
+//  TASK 4  CENTRALITY: WHICH PARTS OF THE SUPPLY CHAIN ARE MOST CRITICAL?
+//
+//  Use case : If one supplier or distribution centre failed (cyclone,
+//             refrigeration failure, strike), which failure would hurt the
+//             stores most? The answer decides where backup suppliers and
+//             contingency plans are needed first.
+//  Design   : 5 centrality algorithms (Degree, PageRank, Betweenness,
+//             Closeness, Eigenvector), weighted and unweighted where it makes
+//             sense, 8 runs in total. Every algorithm is then tested against
+//             an independent ground truth computed from the data
+//             (pairsAtRisk, unitsAtRisk) using Spearman rank correlation.
+// ============================================================================
+
+// ---- 4.1 Project the supply network (34 nodes, 254 relationships) ---------
+// Supplier -> Product (SUPPLIES), Supplier -> DC (SHIPS_VIA),
+// Supplier or DC -> Store (DELIVERS_TO), Store -> Product (SELLS),
+// each weighted by units, treated as undirected.
+CALL () {
+  MATCH (sup:Supplier)<-[:PLACED_WITH]-(:PurchaseOrder)<-[:FULFILS]-(:Delivery)
+        -[:DELIVERED]->(b:StockBatch)-[:OF_PRODUCT]->(p:Product)
+  RETURN sup AS source, p AS target, 'SUPPLIES' AS type, sum(b.qtyReceived) AS units
+  UNION
+  MATCH (sup:Supplier)<-[:PLACED_WITH]-(:PurchaseOrder)<-[:FULFILS]-(d:Delivery)
+        -[:CONSIGNED_BY]->(dc:DistributionCentre),
+        (d)-[:DELIVERED]->(b:StockBatch)
+  RETURN sup AS source, dc AS target, 'SHIPS_VIA' AS type, sum(b.qtyReceived) AS units
+  UNION
+  MATCH (c:Supplier|DistributionCentre)<-[:CONSIGNED_BY]-(:Delivery)-[:DELIVERED]->(b:StockBatch)
+        -[:STORED_IN]->(:ShelfBay)-[:LOCATED_IN]->(st:Store)
+  RETURN c AS source, st AS target, 'DELIVERS_TO' AS type, sum(b.qtyReceived) AS units
+  UNION
+  MATCH (st:Store)<-[:OCCURS_AT]-(:Sale)-[:HAS_LINE]->(l:SaleLine)
+        -[:DRAWS_FROM]->(:StockBatch)-[:OF_PRODUCT]->(p:Product)
+  RETURN st AS source, p AS target, 'SELLS' AS type, sum(l.qtySold) AS units
+}
+WITH gds.graph.project('supplyNet', source, target,
+       { sourceNodeLabels: labels(source),
+         targetNodeLabels: labels(target),
+         relationshipType: type,
+         relationshipProperties: { units: toFloat(units) } },
+       { undirectedRelationshipTypes: ['*'] }) AS g
+RETURN g.graphName AS graph, g.nodeCount AS nodes, g.relationshipCount AS relationships;
+
+// ---- 4.2 Run all 8 centrality configurations in mutate mode ---------------
+// maxIterations is raised from the default 20 so that PageRank and
+// Eigenvector converge (unweighted Eigenvector needed 96 iterations).
+// Betweenness is not weighted: GDS treats a weight as a distance.
+CALL gds.degree.mutate('supplyNet', {mutateProperty: 'degree'})
+  YIELD computeMillis AS t1
+CALL gds.degree.mutate('supplyNet', {mutateProperty: 'wDegree',
+       relationshipWeightProperty: 'units'})
+  YIELD computeMillis AS t2
+CALL gds.pageRank.mutate('supplyNet', {mutateProperty: 'pageRank',
+       relationshipWeightProperty: 'units', maxIterations: 200})
+  YIELD computeMillis AS t3, ranIterations AS i3, didConverge AS c3
+CALL gds.pageRank.mutate('supplyNet', {mutateProperty: 'pageRankU',
+       maxIterations: 200})
+  YIELD computeMillis AS t4, ranIterations AS i4, didConverge AS c4
+CALL gds.betweenness.mutate('supplyNet', {mutateProperty: 'betweenness'})
+  YIELD computeMillis AS t5
+CALL gds.closeness.mutate('supplyNet', {mutateProperty: 'closeness'})
+  YIELD computeMillis AS t6
+CALL gds.eigenvector.mutate('supplyNet', {mutateProperty: 'eigenvector',
+       maxIterations: 200})
+  YIELD computeMillis AS t7, ranIterations AS i7, didConverge AS c7
+CALL gds.eigenvector.mutate('supplyNet', {mutateProperty: 'wEigenvector',
+       relationshipWeightProperty: 'units', maxIterations: 200})
+  YIELD computeMillis AS t8, ranIterations AS i8, didConverge AS c8
+UNWIND [
+  {algorithm: 'Degree',      property: 'degree',       weighted: false, iterations: null, converged: null, ms: t1},
+  {algorithm: 'Degree',      property: 'wDegree',      weighted: true,  iterations: null, converged: null, ms: t2},
+  {algorithm: 'PageRank',    property: 'pageRank',     weighted: true,  iterations: i3,   converged: c3,   ms: t3},
+  {algorithm: 'PageRank',    property: 'pageRankU',    weighted: false, iterations: i4,   converged: c4,   ms: t4},
+  {algorithm: 'Betweenness', property: 'betweenness',  weighted: false, iterations: null, converged: null, ms: t5},
+  {algorithm: 'Closeness',   property: 'closeness',    weighted: false, iterations: null, converged: null, ms: t6},
+  {algorithm: 'Eigenvector', property: 'eigenvector',  weighted: false, iterations: i7,   converged: c7,   ms: t7},
+  {algorithm: 'Eigenvector', property: 'wEigenvector', weighted: true,  iterations: i8,   converged: c8,   ms: t8}
+] AS run
+RETURN run.algorithm AS algorithm, run.property AS property, run.weighted AS weighted,
+       run.iterations AS iterations, run.converged AS converged, run.ms AS computeMillis;
+
+// ---- 4.3 Top 5 nodes for each algorithm ------------------------------------
+CALL gds.graph.nodeProperties.stream('supplyNet',
+       ['degree', 'wDegree', 'pageRank', 'pageRankU',
+        'betweenness', 'closeness', 'eigenvector', 'wEigenvector'])
+YIELD nodeId, nodeProperty, propertyValue
+WITH nodeProperty AS algorithm, propertyValue AS score, gds.util.asNode(nodeId) AS n
+ORDER BY algorithm, score DESC
+WITH algorithm,
+     collect(coalesce(n.storeName, n.supplierName, n.dcName, n.productName)
+             + ' (' + toString(round(score, 3)) + ')') AS ranked
+RETURN algorithm, ranked[0..5] AS top5
+ORDER BY algorithm;
+
+// ---- 4.4 Supply side scores beside the ground truth -----------------------
+// pairsAtRisk : store and product combinations left with no supply route if
+//               this supplier or DC fails. unitsAtRisk : their units.
+// Line 7 uses the Cypher 25 map comprehension, which replaces the deprecated
+// apoc.map.fromPairs function.
+CALL gds.graph.nodeProperties.stream('supplyNet',
+       ['degree', 'wDegree', 'pageRank', 'pageRankU',
+        'betweenness', 'closeness', 'eigenvector', 'wEigenvector'])
+YIELD nodeId, nodeProperty, propertyValue
+WITH gds.util.asNode(nodeId) AS n, collect([nodeProperty, propertyValue]) AS pairs
+WHERE n:Supplier OR n:DistributionCentre
+WITH n, {pair IN pairs | pair[0]: pair[1]} AS s
+CALL (n) {
+  MATCH (st:Store)<-[:LOCATED_IN]-(:ShelfBay)<-[:STORED_IN]-(b:StockBatch)-[:OF_PRODUCT]->(p:Product),
+        (b)<-[:DELIVERED]-(d:Delivery)-[:CONSIGNED_BY]->(c)
+  OPTIONAL MATCH (d)-[:FULFILS]->(:PurchaseOrder)-[:PLACED_WITH]->(sup:Supplier)
+  WITH st, p, collect([x IN [sup, c] WHERE x IS NOT NULL]) AS routes,
+       sum(b.qtyReceived) AS units
+  WHERE all(r IN routes WHERE n IN r)
+  RETURN count(*) AS pairsAtRisk, sum(units) AS unitsAtRisk
+}
+RETURN coalesce(n.supplierName, n.dcName) AS node,
+       labels(n)[0]                       AS type,
+       s.degree                           AS degree,
+       s.wDegree                          AS wDegree,
+       round(s.pageRank, 3)               AS pageRank,
+       round(s.pageRankU, 3)              AS pageRankU,
+       round(s.betweenness, 2)            AS betweenness,
+       round(s.closeness, 3)              AS closeness,
+       round(s.eigenvector, 3)            AS eigenvector,
+       round(s.wEigenvector, 3)           AS wEigenvector,
+       pairsAtRisk, unitsAtRisk
+ORDER BY pairsAtRisk DESC, unitsAtRisk DESC;
+
+// ---- 4.5 Spearman rank correlation of each algorithm with the ground truth
+// Ranks use average ranks for ties. Spearman rho is the Pearson correlation
+// of the ranks, computed with list comprehensions and reduce().
+// Result: weighted Degree, weighted Eigenvector and weighted PageRank
+// rho = 0.936, unweighted measures 0.68 to 0.79, Betweenness 0.349.
+CALL gds.graph.nodeProperties.stream('supplyNet',
+       ['degree', 'wDegree', 'pageRank', 'pageRankU',
+        'betweenness', 'closeness', 'eigenvector', 'wEigenvector'])
+YIELD nodeId, nodeProperty, propertyValue
+WITH gds.util.asNode(nodeId) AS n,
+     collect({algorithm: nodeProperty, score: propertyValue}) AS scores
+WHERE n:Supplier OR n:DistributionCentre
+CALL (n) {
+  MATCH (st:Store)<-[:LOCATED_IN]-(:ShelfBay)<-[:STORED_IN]-(b:StockBatch)-[:OF_PRODUCT]->(p:Product),
+        (b)<-[:DELIVERED]-(d:Delivery)-[:CONSIGNED_BY]->(c)
+  OPTIONAL MATCH (d)-[:FULFILS]->(:PurchaseOrder)-[:PLACED_WITH]->(sup:Supplier)
+  WITH st, p, collect([x IN [sup, c] WHERE x IS NOT NULL]) AS routes,
+       sum(b.qtyReceived) AS units
+  WHERE all(r IN routes WHERE n IN r)
+  RETURN count(*) AS pairsAtRisk, sum(units) AS unitsAtRisk
+}
+UNWIND scores AS s
+WITH s.algorithm AS algorithm,
+     collect({name: coalesce(n.supplierName, n.dcName), x: s.score,
+              p: pairsAtRisk, u: unitsAtRisk}) AS rows
+WITH algorithm, rows,
+     [r IN rows | r.x] AS xs, [r IN rows | r.p] AS ps, [r IN rows | r.u] AS us
+WITH algorithm, rows,
+     [r IN rows | size([v IN xs WHERE v > r.x]) + (size([v IN xs WHERE v = r.x]) + 1) / 2.0] AS rx,
+     [r IN rows | size([v IN ps WHERE v > r.p]) + (size([v IN ps WHERE v = r.p]) + 1) / 2.0] AS rp,
+     [r IN rows | size([v IN us WHERE v > r.u]) + (size([v IN us WHERE v = r.u]) + 1) / 2.0] AS ru
+WITH algorithm, rows, rx, rp, ru, size(rows) AS k, (size(rows) + 1) / 2.0 AS m
+RETURN algorithm,
+       round(reduce(a = 0.0, i IN range(0, k - 1) | a + (rx[i] - m) * (rp[i] - m))
+             / sqrt(reduce(a = 0.0, v IN rx | a + (v - m)^2)
+                  * reduce(a = 0.0, v IN rp | a + (v - m)^2)), 3) AS spearmanPairs,
+       round(reduce(a = 0.0, i IN range(0, k - 1) | a + (rx[i] - m) * (ru[i] - m))
+             / sqrt(reduce(a = 0.0, v IN rx | a + (v - m)^2)
+                  * reduce(a = 0.0, v IN ru | a + (v - m)^2)), 3) AS spearmanUnits,
+       reduce(t = null, r IN rows | CASE WHEN t IS NULL OR r.x > t.x THEN r ELSE t END).name
+         AS rankedFirst
+ORDER BY spearmanPairs DESC, spearmanUnits DESC, algorithm;
+
+
+// ============================================================================
+//  CLEAN UP: release the in memory projection
+// ============================================================================
+CALL gds.graph.drop('supplyNet');
