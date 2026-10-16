@@ -38,7 +38,7 @@ This log records the team's progress, the decisions we made and why, the checks 
 ## Decisions
 
 1. **Regenerate the transaction data.** The Assessment 2 sample broke 24 business rules 150 times and was too small for graph algorithms. Master data was kept byte for byte; only transaction tables were regenerated, with the same columns. Justified in Report Section 2.
-2. **Optimise the graph model (Model B).** Seven optimisations: subclass tables to labels, CONSIGNOR removed, phones as a list, associative and weak entities to relationships with properties, 1:1 delivery line collapsed, foreign key columns dropped.Each was applied after the precondition on the data passed.
+2. **Optimise the graph model (Model B).** Seven optimisations: subclass tables to labels, CONSIGNOR removed, phones as a list, associative and weak entities to relationships with properties, 1:1 delivery line collapsed, foreign key columns dropped. Each was applied after the precondition on the data passed.
 3. **Keep four structures as nodes.** SupplyAgreement and SaleLine are hyperedges, Markdown is the target of a relationship (EER aggregation), and WriteOff is a business event auditors look up directly.
 4. **Measure the optimisation, not just argue it.** Model A was built and both models were profiled; database hits were used instead of milliseconds because timings are noisy on a small graph.
 5. **Fair timeliness measure in Q2.** On time is measured against each purchase order's required date, so distribution centre deliveries are not penalised by supplier lead times.

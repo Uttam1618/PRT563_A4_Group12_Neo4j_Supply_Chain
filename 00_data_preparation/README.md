@@ -5,7 +5,7 @@ Why the transaction data was regenerated, and how to reproduce it.
 ## The problem
 
 An audit of the Assessment 2 sample data against 24 business rules found
-**150 violations**. For instance, products delivered against purchase order before the purchase order was issued, stock sold prior to use by date or even before it arrived and deliveries were made prior to the disruption. See `audit_before_A2_data.txt`.
+**150 violations**. For instance, products were delivered that their purchase order never ordered, stock was sold after its use by date or even before it arrived, and disruptions were recorded as delaying deliveries that took place before the disruption began. See `audit_before_A2_data.txt`.
 
 ## What changed
 

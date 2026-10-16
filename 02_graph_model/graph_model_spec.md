@@ -58,8 +58,7 @@ these is as important as the optimisations themselves.
 |:--|:--|
 | `SupplyAgreement` | It links **three** things: supplier, product and store. A Neo4j relationship joins exactly two nodes. This is the graph form of our ternary relationship, the same limitation noted in Assessment 2. |
 | `SaleLine` | It links **three** things: sale, stock batch and (sometimes) a markdown. If it's collapsed, it wouldn't be associated with the markdown that priced it. |
-| `Markdown` | It is pointed to by `SaleLine` and a relationship can't be the target of another relationship. This is the graph representation of our EER aggregation.
- |
+| `Markdown` | It is pointed to by `SaleLine` and a relationship can't be the target of another relationship. This is the graph representation of our EER aggregation.|
 | `WriteOff` | Could technically become a relationship (it links two things only), but it is a business **event** with its own identity, date and reason that auditors look up directly. Kept as a node for clarity. Discussed as an alternative. |
 
 ---
