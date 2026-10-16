@@ -1,5 +1,4 @@
 // ============================================================================
-//  PRT563 Advanced Data Management, Assessment 4, Group 12
 //  algorithms_task4.txt : Graph Data Science centrality use case (Task 4)
 //
 //  Target   : Neo4j 2026.09 (Neo4j Desktop), Cypher 25

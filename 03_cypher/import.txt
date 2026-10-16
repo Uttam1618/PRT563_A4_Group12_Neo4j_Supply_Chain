@@ -1,5 +1,4 @@
 // ============================================================================
-//  PRT563 Advanced Data Management, Assessment 4, Group 12
 //  import.txt : migrate the Assessment 2 relational database into Neo4j
 //
 //  Target   : Neo4j 2026.09 (Neo4j Desktop), Cypher 25
@@ -8,21 +7,6 @@
 //             every row passes the 24 business rules in audit.py
 //  Result   : 12,727 nodes, 27,681 relationships, 18 node types (23 labels),
 //             26 relationship types  (Model B, the optimised graph model)
-//
-//  BEFORE RUNNING
-//    Copy all 29 .csv files into the instance's import folder:
-//    Neo4j Desktop > instance [...] > Open > Instance folder > import
-//
-//  HOW TO RUN
-//    Run the five parts in order. Every statement uses MERGE on a
-//    constrained key, so the whole script can be run again safely without
-//    creating duplicates.
-//
-//    PART 1  Constraints          (one per node type, 18)
-//    PART 2  Indexes              (search indexes for the use case queries)
-//    PART 3  Nodes                (12,727 nodes, plus extra labels and lists)
-//    PART 4  Relationships        (27,681 relationships)
-//    PART 5  Clean up and verify
 // ============================================================================
 
 // To start completely fresh, uncomment and run this line first:

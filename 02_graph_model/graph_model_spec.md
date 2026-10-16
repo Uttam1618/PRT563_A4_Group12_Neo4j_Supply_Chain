@@ -26,9 +26,7 @@ extra labels, or list properties. No data is lost.
 
 ## 2. Model A, the baseline (general conversion rules)
 
-Each table becomes a label, each row a node, each column a property, and each
-foreign key a relationship. This is correct and complete, and it is the
-starting point the optimisations are measured against.
+Each table turns into a label, each row into a node, each column into a property and each foreign key into a relationship. This is correct and complete – and this is the starting point the optimisations are measured against.
 
 29 labels, 38 relationship types, 16,786 nodes, 31,740 relationships.
 
@@ -36,8 +34,7 @@ starting point the optimisations are measured against.
 
 ## 3. The seven optimisations that turn Model A into Model B
 
-Each one is checked against the data before it is applied. A check that
-fails would mean the optimisation is unsafe.
+Before being applied, each one is verified from the data. A check that fails would mean the optimisation is unsafe.
 
 | # | Optimisation | Model A | Model B | Precondition checked | Nodes saved | Rels saved |
 |--:|:--|:--|:--|:--|--:|--:|
@@ -60,8 +57,9 @@ these is as important as the optimisations themselves.
 | Kept as node | Why it cannot become a relationship |
 |:--|:--|
 | `SupplyAgreement` | It links **three** things: supplier, product and store. A Neo4j relationship joins exactly two nodes. This is the graph form of our ternary relationship, the same limitation noted in Assessment 2. |
-| `SaleLine` | It links **three** things: sale, stock batch and (sometimes) a markdown. Collapsing it would lose the link to the markdown that priced it. |
-| `Markdown` | `SaleLine` points at it, and a relationship cannot be the target of another relationship. It is the graph form of our EER aggregation. |
+| `SaleLine` | It links **three** things: sale, stock batch and (sometimes) a markdown. If it's collapsed, it wouldn't be associated with the markdown that priced it. |
+| `Markdown` | It is pointed to by `SaleLine` and a relationship can't be the target of another relationship. This is the graph representation of our EER aggregation.
+ |
 | `WriteOff` | Could technically become a relationship (it links two things only), but it is a business **event** with its own identity, date and reason that auditors look up directly. Kept as a node for clarity. Discussed as an alternative. |
 
 ---
@@ -96,9 +94,7 @@ these is as important as the optimisations themselves.
 
 Neo4j uniqueness constraints work best on a single property. ShelfBay, SaleLine
 and SupplyAgreement had composite primary keys in SQL, so each gets one
-surrogate key built from those columns (for example bay `1:A12`). This keeps a
-single property constraint on every node type, and the owner key is still
-represented properly by the relationship (`LOCATED_IN`, `HAS_LINE`, `OFFERS`).
+surrogate key built from those columns (for example bay `1:A12`). This maintains one property constraint per node type and the owner key is still correctly represented by the relationship (`LOCATED_IN`, `HAS_LINE`, `OFFERS`).
 
 ## 5. Model B, relationships
 
@@ -142,9 +138,7 @@ traced back to the conceptual model.
 ## 6. Efficiency benchmark: hops per question
 
 A "hop" is one relationship traversed. Fewer hops means fewer lookups at query
-time and simpler Cypher. Planned for Step 11: load **both** models into two
-separate databases and run these with `PROFILE` to compare actual database hits,
-turning this table from a design argument into a measured result.
+time and simpler Cypher. The intent of Step 11 is: load both models into two databases and execute them both with `PROFILE` to compare the actual hits in the databases and to turn this table from a design argument to a measured result.
 
 | # | Business question | Model A path | A | Model B path | B |
 |--:|:--|:--|--:|:--|--:|

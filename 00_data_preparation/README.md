@@ -5,23 +5,18 @@ Why the transaction data was regenerated, and how to reproduce it.
 ## The problem
 
 An audit of the Assessment 2 sample data against 24 business rules found
-**150 violations**. For example, products were delivered against purchase orders
-that never ordered them, stock was sold after its use by date or before it
-arrived, and disruptions delayed deliveries that happened before the disruption
-began. See `audit_before_A2_data.txt`.
+**150 violations**. For instance, products delivered against purchase order before the purchase order was issued, stock sold prior to use by date or even before it arrived and deliveries were made prior to the disruption. See `audit_before_A2_data.txt`.
 
 ## What changed
 
-* **Master data is unchanged.** Stores, shelf bays, categories, products,
-  perishable and ambient details, suppliers, distribution centres, consignors,
-  employees, phones, role tables and supply disruptions are copied byte for
-  byte from the Assessment 2 export.
+* **Master data is unchanged.** Master data remains the same. Stores, shelf bays and categories, products, perishable and ambient details, suppliers, distribution centres, consignors, employees, phones, role tables and supply disruptions are copied from the Assessment 2 export, byte for byte.
+
 * **Transaction tables were regenerated** (supply agreements, purchase orders
   and lines, deliveries and lines, invoices, disruption impacts, stock batches,
   stock counts, markdowns, sales and lines, write offs). They come from a day by
   day simulation of the four stores from 5 January to 30 August 2026, with a
   fixed random seed.
-* The CSV columns are identical, so `import.txt` needed no structural change.
+* The CSV columns were the same, so no changes were required to `import.txt`.
 * After regeneration there are **0 violations**. See
   `audit_after_regenerated_data.txt`.
 

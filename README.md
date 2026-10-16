@@ -20,9 +20,10 @@ This repository holds everything needed to rebuild and check our Assessment 4 wo
 03_cypher/
     import.txt           Task 2: migration and indexes
     queries.txt          Task 3: four query use cases
+    model_a_experiment/  naive Model A import and the Model A versus Model B benchmark
+04_graph_algorithms/
     algorithms_task4.txt Task 4: centrality use case (Graph Data Science)
     algorithms_task5.txt Task 5: similarity use case (Graph Data Science)
-    model_a_experiment/  naive Model A import and the Model A versus Model B benchmark
 05_screenshots/          evidence that every script ran, one folder per task
 06_report/               final report (.docx) and the three report charts
 PROJECT_LOG.md           decisions, progress, reviews and individual contributions
@@ -35,7 +36,7 @@ Tested on Neo4j Desktop 2026.09 (Cypher 25) with the Graph Data Science 2026.09 
 1. Create a local instance and copy all 29 files from `01_csv/` into its `import` folder (Neo4j Desktop, instance menu, Open, Instance folder, import).
 2. Run `03_cypher/import.txt` part by part. Every statement uses MERGE on a constrained key, so it is safe to run again. Check 3 should return 12,727 nodes and 27,681 relationships, and Checks 4 and 4b should return only zeros.
 3. Run each query in `03_cypher/queries.txt` on its own.
-4. Install the Graph Data Science plugin, then run `algorithms_task4.txt` and `algorithms_task5.txt` in order. Each starts by building an in memory projection.
+4. Install the Graph Data Science plugin and execute `algorithms_task4.txt` followed by `algorithms_task5.txt`. Each starts by building an in memory projection.
 5. Optional: build Model A in a second database with `model_a_experiment/importA.txt` and compare it with `benchmark.txt`.
 
 To regenerate the data and rerun the audit (Python 3):
@@ -50,7 +51,7 @@ python3 expected_counts.py ../01_csv
 ## Key results
 
 * Model B (optimised) holds the same data as the naive Model A in 24% fewer nodes and 13% fewer relationships, and needs 33.1% fewer database hits across seven benchmark questions.
-* Weighted centrality ranks real supply risk with a Spearman correlation of 0.936 and identifies Berrimah Regional DC as the most critical node.
+* Weighted centrality scores real supply risk with a Spearman correlation of 0.936, with Berrimah Regional DC exhibiting the highest score.
 * Jaccard Node Similarity predicts joint purchases in unseen baskets about three times better than chance.
 
 ## Team
